@@ -1,0 +1,30 @@
+{
+  "name": "HalalLens — U.S. Grocery Ingredient Check",
+  "short_name": "HalalLens",
+  "description": "Scan U.S. grocery barcodes and check questionable ingredients like enzymes, gelatin, whey, and emulsifiers.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f6f4ee",
+  "theme_color": "#144a38",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

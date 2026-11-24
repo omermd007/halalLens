@@ -1,0 +1,1 @@
+"""HalalLens backend application package."""
