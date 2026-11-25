@@ -1,20 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
   Copy,
   Download,
   ExternalLink,
+  Globe,
   Image as ImageIcon,
   Lock,
+  Mail,
+  Phone,
   Plus,
   RotateCcw,
+  Search,
   Upload,
   X,
 } from 'lucide-react';
 import { startCameraBarcodeScan, type CameraController } from '../engine/barcodeScanner';
 import { addMonths, buildOutreachDraft, parseForumPost, todayISO } from '../engine/evaluator';
 import { FORUM_SAMPLES } from '../engine/seeds';
+import {
+  buildBrandSearchUrl,
+  isPlaceholderEmail,
+  lookupBrandContactFromApi,
+  resolveBrandContact,
+} from '../engine/store';
 import type {
   AppMode,
   BrandPolicyRecord,
@@ -22,6 +32,7 @@ import type {
   ForumSignalItem,
   ProductEvaluation,
   ProductRecord,
+  SavedBrandContact,
   StrictnessSettings,
 } from '../engine/types';
 
@@ -146,34 +157,151 @@ export function CameraScanSheet({
   );
 }
 
+function normalizeHttpUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
 export function DraftEmailSheet({
   ev,
   allProducts,
+  brandContacts,
+  appMode,
   mode,
   sigId,
+  onSaveBrandContact,
   onMarkSent,
   onClose,
   onToast,
 }: {
   ev: ProductEvaluation;
   allProducts: ProductRecord[];
+  brandContacts: Record<string, SavedBrandContact>;
+  appMode: AppMode;
   mode: 'full' | 'quick';
   sigId?: string;
-  onMarkSent: (to: string, subject: string, body: string, mode: 'full' | 'quick') => void;
+  onSaveBrandContact: (
+    brand: string,
+    contact: { email: string; contact_url: string; phone?: string | null }
+  ) => void;
+  onMarkSent: (
+    to: string,
+    contactUrl: string,
+    subject: string,
+    body: string,
+    mode: 'full' | 'quick'
+  ) => void;
   onClose: () => void;
   onToast: (msg: string) => void;
 }) {
-  const initial = buildOutreachDraft(ev, allProducts, mode, sigId);
-  const [to, setTo] = useState(initial.to);
+  const initial = useMemo(
+    () => buildOutreachDraft(ev, allProducts, mode, sigId),
+    [ev, allProducts, mode, sigId]
+  );
+
+  const resolved = useMemo(
+    () => resolveBrandContact(ev.p.brand, brandContacts, ev.p.email, ev.p.contact_url),
+    // Resolve once for initial values (re-resolved cleanly on mount)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ev.p.id]
+  );
+
+  const [to, setTo] = useState(resolved.email);
+  const [contactUrl, setContactUrl] = useState(resolved.contact_url);
+  const [phone, setPhone] = useState<string | null>(resolved.phone);
   const [subject, setSubject] = useState(initial.subject);
   const [body, setBody] = useState(initial.body);
+  const [savedToBook, setSavedToBook] = useState(resolved.source === 'saved');
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupNote, setLookupNote] = useState<string | null>(null);
 
-  const mailtoHref = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const trimmedEmail = to.trim();
+  const hasEmail = Boolean(trimmedEmail) && !isPlaceholderEmail(trimmedEmail);
+  const normalizedUrl = normalizeHttpUrl(contactUrl);
+  const hasContactUrl = Boolean(normalizedUrl);
+  const isWebFormOnly = !hasEmail && hasContactUrl;
+  const isUnknownBrand = !hasEmail && !hasContactUrl;
+
+  const displayBrand =
+    resolved.matchedParent &&
+    resolved.matchedParent.toLowerCase() !== ev.p.brand.toLowerCase()
+      ? `${ev.p.brand} (${resolved.matchedParent})`
+      : ev.p.brand;
+
+  const searchUrl = buildBrandSearchUrl(ev.p.brand);
+  const mailtoHref = `mailto:${encodeURIComponent(trimmedEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  const persistContact = (nextEmail: string, nextUrl: string, nextPhone: string | null = phone) => {
+    onSaveBrandContact(ev.p.brand, {
+      email: nextEmail,
+      contact_url: nextUrl,
+      phone: nextPhone,
+    });
+    setSavedToBook(Boolean(nextEmail.trim() || nextUrl.trim()));
+  };
+
+  const copyMessage = async (): Promise<boolean> => {
+    const text = `Subject: ${subject}\n\n${body}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through
+    }
+    return false;
+  };
+
+  const handleCopyAndOpenForm = () => {
+    void copyMessage().then((ok) => {
+      onToast(
+        ok
+          ? `Copied message & opened ${ev.p.brand} contact form.`
+          : `Opened ${ev.p.brand} contact form. Copy and paste the message below.`
+      );
+    });
+    if (normalizedUrl) {
+      window.open(normalizedUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleFindOfficialContact = async () => {
+    if (appMode === 'api') {
+      setLookingUp(true);
+      setLookupNote(null);
+      const res = await lookupBrandContactFromApi(ev.p.brand);
+      setLookingUp(false);
+      if (res && (res.email || res.contact_url)) {
+        const nextEmail = res.email || '';
+        const nextUrl = res.contact_url || '';
+        const nextPhone = res.phone || null;
+        setTo(nextEmail);
+        setContactUrl(nextUrl);
+        setPhone(nextPhone);
+        setLookupNote(
+          res.note ||
+            (res.verified
+              ? `Found verified contact for ${res.brand}.`
+              : 'Found a candidate support contact — please review before sending.')
+        );
+        persistContact(nextEmail, nextUrl, nextPhone);
+        onToast(`Found support contact for ${res.brand}.`);
+        return;
+      }
+      setLookupNote(
+        'No official support contact was auto-detected. Opening web search so you can copy and save it below.'
+      );
+    }
+    window.open(searchUrl, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <SheetShell
       title="Ask the brand"
-      sub={`${ev.p.brand} · ${ev.p.name} — HalalLens drafts it, you send it`}
+      sub={`${displayBrand} · ${ev.p.name} — HalalLens drafts it, you send it`}
       onClose={onClose}
       footer={
         <>
@@ -181,24 +309,46 @@ export function DraftEmailSheet({
             className="btn btn-outline"
             type="button"
             onClick={() => {
-              void navigator.clipboard?.writeText(`Subject: ${subject}\n\n${body}`).then(
-                () => onToast('Copied email to clipboard.'),
-                () => onToast('Select and copy the message text.')
+              void copyMessage().then((ok) =>
+                onToast(ok ? 'Copied message to clipboard.' : 'Select and copy the message text.')
               );
             }}
           >
             <Copy size={15} />
             Copy
           </button>
-          <a className="btn btn-outline" href={mailtoHref}>
-            <ExternalLink size={15} />
-            Open in email app
-          </a>
+
+          {hasEmail ? (
+            <a className="btn btn-primary" href={mailtoHref}>
+              <Mail size={15} />
+              Open in email app
+            </a>
+          ) : isWebFormOnly ? (
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={handleCopyAndOpenForm}
+            >
+              <ExternalLink size={15} />
+              Copy message &amp; open contact form
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={lookingUp}
+              onClick={() => void handleFindOfficialContact()}
+            >
+              <Search size={15} />
+              {lookingUp ? 'Searching…' : 'Find official support contact'}
+            </button>
+          )}
+
           <button
-            className="btn btn-primary"
+            className="btn btn-outline"
             type="button"
             onClick={() => {
-              onMarkSent(to, subject, body, mode);
+              onMarkSent(trimmedEmail, normalizedUrl, subject, body, mode);
               onClose();
             }}
           >
@@ -215,24 +365,132 @@ export function DraftEmailSheet({
         </div>
       ))}
 
+      {isWebFormOnly && (
+        <div className="notice tone-ok" style={{ marginBottom: 14 }}>
+          <Globe size={16} style={{ flex: 'none', marginTop: 2 }} />
+          <div>
+            <b>{displayBrand}</b> handles inquiries via their online contact form rather than direct email.
+            Tap <b>Copy message &amp; open contact form</b> below to paste and submit it yourself.
+            {phone && (
+              <div className="small muted" style={{ marginTop: 4 }}>
+                <Phone size={12} style={{ verticalAlign: '-1px', marginRight: 4 }} />
+                Consumer care phone: <b>{phone}</b>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isUnknownBrand && (
+        <div className="notice tone-neutral" style={{ marginBottom: 14 }}>
+          <Search size={16} style={{ flex: 'none', marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div>
+              <b>{ev.p.brand}</b> isn&apos;t in the verified U.S. brand directory yet.
+            </div>
+            <div className="small muted" style={{ marginTop: 4 }}>
+              Search for their official support contact, then paste the email or contact form URL below — HalalLens will remember it for every future {ev.p.brand} product.
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-outline btn-sm"
+                type="button"
+                disabled={lookingUp}
+                onClick={() => void handleFindOfficialContact()}
+              >
+                <Search size={14} />
+                {lookingUp ? 'Searching…' : 'Find official support contact'}
+              </button>
+              {appMode === 'api' && (
+                <a
+                  className="btn btn-ghost btn-sm"
+                  href={searchUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink size={14} />
+                  Search web
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lookupNote && (
+        <div className="notice tone-doubt" style={{ marginBottom: 14 }}>
+          <AlertTriangle size={16} style={{ flex: 'none', marginTop: 2 }} />
+          <div>{lookupNote}</div>
+        </div>
+      )}
+
       <div className="field">
         <label className="field-l" htmlFor="d-to">
-          Brand email
+          {isWebFormOnly ? 'To: Direct email (optional — if you have one)' : 'To: Brand support email'}
         </label>
         <input
           id="d-to"
           className="input"
+          type="email"
           value={to}
-          placeholder="Paste the brand's consumer care email"
-          onChange={(e) => setTo(e.target.value)}
+          placeholder={
+            isWebFormOnly
+              ? 'Optional — enter a direct email to save & use your email app instead'
+              : "Paste the brand's official consumer care email"
+          }
+          onChange={(e) => {
+            const next = e.target.value;
+            setTo(next);
+            persistContact(next, contactUrl);
+          }}
         />
-        {ev.p.contact_url && (
+        <div className="field-h">
+          {hasEmail && resolved.source === 'directory' && !savedToBook && (
+            <span>
+              Verified U.S. consumer care email for <b>{displayBrand}</b>.
+              {phone ? ` Phone: ${phone}.` : ''}{' '}
+            </span>
+          )}
+          {savedToBook && (
+            <span>
+              Saved in your Brand Contact Book for future <b>{ev.p.brand}</b> products.{' '}
+            </span>
+          )}
+          {hasEmail && hasContactUrl && (
+            <>
+              Or use their{' '}
+              <a href={normalizedUrl} target="_blank" rel="noreferrer">
+                online contact form
+              </a>
+              .
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="field">
+        <label className="field-l" htmlFor="d-url">
+          Official contact form URL
+        </label>
+        <input
+          id="d-url"
+          className="input"
+          type="url"
+          value={contactUrl}
+          placeholder="https://brand.com/contact-us"
+          onChange={(e) => {
+            const next = e.target.value;
+            setContactUrl(next);
+            persistContact(to, next);
+          }}
+        />
+        {hasContactUrl && (
           <div className="field-h">
-            Or use their{' '}
-            <a href={ev.p.contact_url} target="_blank" rel="noreferrer">
-              contact form
-            </a>
-            .
+            Opens{' '}
+            <a href={normalizedUrl} target="_blank" rel="noreferrer">
+              {normalizedUrl}
+            </a>{' '}
+            in a new tab.
           </div>
         )}
       </div>

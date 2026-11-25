@@ -1,0 +1,601 @@
+[
+  {
+    "brand": "Kraft Heinz",
+    "aliases": [
+      "Kraft",
+      "Kraft Heinz",
+      "Kraft Mac & Cheese",
+      "Kraft Macaroni & Cheese",
+      "Kraft Singles",
+      "Philadelphia",
+      "Oscar Mayer",
+      "Jell-O",
+      "Jell O",
+      "Heinz",
+      "Velveeta",
+      "Capri Sun",
+      "Kool-Aid",
+      "Ore-Ida",
+      "Classico",
+      "Grey Poupon",
+      "Stove Top",
+      "Cool Whip",
+      "Lunchables",
+      "Maxwell House",
+      "Cracker Barrel Cheese"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://contactus.kraftheinz.com/en-us",
+    "phone": null
+  },
+  {
+    "brand": "General Mills",
+    "aliases": [
+      "General Mills",
+      "Annie's",
+      "Annie's Homegrown",
+      "Annies",
+      "Cheerios",
+      "Nature Valley",
+      "Yoplait",
+      "Pillsbury",
+      "Betty Crocker",
+      "Cinnamon Toast Crunch",
+      "Lucky Charms",
+      "Fiber One",
+      "Old El Paso",
+      "Progresso",
+      "Totino's",
+      "Larabar",
+      "Chex",
+      "Bisquick",
+      "Gold Medal",
+      "Cascadian Farm",
+      "Oui",
+      "Fruit Roll-Ups",
+      "Gushers"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://ask.generalmills.com/s/",
+    "phone": "1-800-248-7310"
+  },
+  {
+    "brand": "Goodles",
+    "aliases": [
+      "Goodles",
+      "Gooder Foods"
+    ],
+    "contact_type": "email",
+    "email": "help@goodles.com",
+    "contact_url": "https://www.goodles.com/contact/",
+    "phone": "1-707-466-3537"
+  },
+  {
+    "brand": "Saffron Road",
+    "aliases": [
+      "Saffron Road",
+      "American Halal Company"
+    ],
+    "contact_type": "email",
+    "email": "customerservice@saffronroad.com",
+    "contact_url": "https://www.saffronroad.com/pages/contact",
+    "phone": "1-877-425-2587"
+  },
+  {
+    "brand": "Haribo USA",
+    "aliases": [
+      "Haribo",
+      "Haribo USA",
+      "Haribo of America",
+      "Goldbears"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.haribo.com/en-us/about-us/contact",
+    "phone": "1-866-214-8160"
+  },
+  {
+    "brand": "Trader Joe's",
+    "aliases": [
+      "Trader Joe's",
+      "Trader Joes",
+      "Trader Giotto's",
+      "Trader Ming's",
+      "Trader Jose's"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.traderjoes.com/home/contact-us/product-feedback.html",
+    "phone": null
+  },
+  {
+    "brand": "Mondelēz International",
+    "aliases": [
+      "Mondelez",
+      "Mondelēz",
+      "Mondelēz International",
+      "Mondelez International",
+      "Nabisco",
+      "Oreo",
+      "Ritz",
+      "Chips Ahoy",
+      "Chips Ahoy!",
+      "Triscuit",
+      "Wheat Thins",
+      "Honey Maid",
+      "belVita",
+      "Teddy Grahams",
+      "Nilla",
+      "Nutter Butter",
+      "Newtons",
+      "Sour Patch Kids",
+      "Swedish Fish",
+      "Cadbury",
+      "Toblerone",
+      "Clif",
+      "Clif Bar",
+      "Tate's Bake Shop",
+      "Enjoy Life",
+      "Enjoy Life Foods",
+      "Hu",
+      "Halls",
+      "Trident"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.mondelezinternational.com/contact-us/consumers/",
+    "phone": "1-800-622-4726"
+  },
+  {
+    "brand": "Cabot Creamery",
+    "aliases": [
+      "Cabot",
+      "Cabot Creamery",
+      "Cabot Cheese",
+      "Agri-Mark"
+    ],
+    "contact_type": "email",
+    "email": "info@cabotcheese.com",
+    "contact_url": "https://cabotcreamery.gorgias.help/en-US",
+    "phone": "1-888-792-2268"
+  },
+  {
+    "brand": "Tillamook",
+    "aliases": [
+      "Tillamook",
+      "Tillamook County Creamery"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.tillamook.com/contact",
+    "phone": "1-855-562-3568"
+  },
+  {
+    "brand": "Kellanova",
+    "aliases": [
+      "Kellanova",
+      "Cheez-It",
+      "Cheez It",
+      "Pringles",
+      "Pop-Tarts",
+      "Pop Tarts",
+      "Eggo",
+      "Nutri-Grain",
+      "Nutri Grain",
+      "Rice Krispies Treats",
+      "MorningStar Farms",
+      "Club Crackers",
+      "Town House",
+      "Carr's",
+      "RXBAR"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.kellanova.com/us/en/contact-us/consumer-relations.html",
+    "phone": "1-800-962-1413"
+  },
+  {
+    "brand": "WK Kellogg Co",
+    "aliases": [
+      "WK Kellogg",
+      "WK Kellogg Co",
+      "Kellogg's",
+      "Kelloggs",
+      "Kellogg",
+      "Frosted Flakes",
+      "Froot Loops",
+      "Frosted Mini-Wheats",
+      "Special K",
+      "Corn Flakes",
+      "Rice Krispies",
+      "Raisin Bran",
+      "Apple Jacks",
+      "Corn Pops",
+      "Kashi",
+      "Bear Naked"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.wkkellogg.com/contact-us",
+    "phone": "1-800-962-1413"
+  },
+  {
+    "brand": "Post Consumer Brands",
+    "aliases": [
+      "Post",
+      "Post Consumer Brands",
+      "Honey Bunches of Oats",
+      "Fruity Pebbles",
+      "Cocoa Pebbles",
+      "Grape-Nuts",
+      "Great Grains",
+      "Malt-O-Meal",
+      "Honeycomb",
+      "Peter Pan"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.postconsumerbrands.com/contact/",
+    "phone": null
+  },
+  {
+    "brand": "PepsiCo / Frito-Lay",
+    "aliases": [
+      "PepsiCo",
+      "Pepsi",
+      "Frito-Lay",
+      "Frito Lay",
+      "Lay's",
+      "Lays",
+      "Doritos",
+      "Cheetos",
+      "Tostitos",
+      "Fritos",
+      "Ruffles",
+      "SunChips",
+      "Sun Chips",
+      "Smartfood",
+      "Stacy's",
+      "PopCorners",
+      "Quaker",
+      "Quaker Oats",
+      "Gatorade",
+      "Rold Gold",
+      "Miss Vickie's",
+      "Cracker Jack"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://contact.pepsico.com/fritolay/contact-us",
+    "phone": "1-800-352-4477"
+  },
+  {
+    "brand": "The Hershey Company",
+    "aliases": [
+      "Hershey's",
+      "Hersheys",
+      "Hershey",
+      "The Hershey Company",
+      "Reese's",
+      "Reeses",
+      "Kit Kat",
+      "KitKat",
+      "Hershey's Kisses",
+      "Twizzlers",
+      "Jolly Rancher",
+      "Ice Breakers",
+      "York",
+      "Almond Joy",
+      "Mounds",
+      "SkinnyPop",
+      "Dot's Homestyle Pretzels",
+      "Brookside",
+      "Heath",
+      "PayDay",
+      "Whoppers",
+      "Milk Duds"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.thehersheycompany.com/en_us/home/contact-us.html",
+    "phone": "1-800-468-1714"
+  },
+  {
+    "brand": "Mars, Incorporated",
+    "aliases": [
+      "Mars",
+      "Mars Wrigley",
+      "Wrigley",
+      "M&M's",
+      "M&Ms",
+      "Snickers",
+      "Twix",
+      "Milky Way",
+      "3 Musketeers",
+      "Skittles",
+      "Starburst",
+      "Dove Chocolate",
+      "Orbit",
+      "Extra",
+      "Juicy Fruit",
+      "Altoids",
+      "Life Savers",
+      "Ben's Original",
+      "Uncle Ben's",
+      "Tasty Bite",
+      "Nature's Bakery"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.mars.com/contact-us",
+    "phone": null
+  },
+  {
+    "brand": "Nestlé USA",
+    "aliases": [
+      "Nestlé",
+      "Nestle",
+      "Nestlé USA",
+      "Nestle USA",
+      "Toll House",
+      "Stouffer's",
+      "Lean Cuisine",
+      "DiGiorno",
+      "California Pizza Kitchen",
+      "Hot Pockets",
+      "Coffee mate",
+      "Coffee-Mate",
+      "Nesquik",
+      "Carnation",
+      "Libby's",
+      "Dreyer's",
+      "Edy's",
+      "Outshine",
+      "Häagen-Dazs",
+      "Haagen-Dazs"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.nestleusa.com/info/contact-us-landing",
+    "phone": "1-800-225-2270"
+  },
+  {
+    "brand": "Chobani",
+    "aliases": [
+      "Chobani",
+      "Chobani Flip",
+      "La Colombe"
+    ],
+    "contact_type": "email",
+    "email": "care@chobani.com",
+    "contact_url": "https://chobaniconsumercare.powerappsportals.com/create_case/",
+    "phone": "1-877-847-6181"
+  },
+  {
+    "brand": "Danone North America",
+    "aliases": [
+      "Danone",
+      "Danone North America",
+      "Dannon",
+      "Oikos",
+      "Activia",
+      "Light + Fit",
+      "Two Good",
+      "Danimals",
+      "Silk",
+      "So Delicious",
+      "International Delight",
+      "SToK",
+      "Follow Your Heart"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.danonenorthamerica.com/contact-us.html",
+    "phone": null
+  },
+  {
+    "brand": "Conagra Brands",
+    "aliases": [
+      "Conagra",
+      "Conagra Brands",
+      "Healthy Choice",
+      "Marie Callender's",
+      "Banquet",
+      "Birds Eye",
+      "Hunt's",
+      "Reddi-wip",
+      "Orville Redenbacher's",
+      "Slim Jim",
+      "Chef Boyardee",
+      "Duncan Hines",
+      "Swiss Miss",
+      "PAM",
+      "Vlasic",
+      "Earth Balance",
+      "Smart Balance",
+      "Gardein",
+      "Boomchickapop",
+      "Angie's BOOMCHICKAPOP",
+      "Ro-Tel",
+      "Rotel"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://contactus.conagrabrands.com/s/",
+    "phone": null
+  },
+  {
+    "brand": "The Campbell's Company",
+    "aliases": [
+      "Campbell's",
+      "Campbells",
+      "Campbell Soup",
+      "The Campbell's Company",
+      "Prego",
+      "Pace",
+      "Swanson",
+      "V8",
+      "Pacific Foods",
+      "Rao's",
+      "Rao's Homemade",
+      "Snyder's of Hanover",
+      "Lance",
+      "Kettle Brand",
+      "Cape Cod",
+      "Late July"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.campbells.com/contact-us/",
+    "phone": "1-800-257-8443"
+  },
+  {
+    "brand": "The J.M. Smucker Co.",
+    "aliases": [
+      "Smucker's",
+      "Smuckers",
+      "J.M. Smucker",
+      "The J.M. Smucker Co.",
+      "Jif",
+      "Uncrustables",
+      "Folgers",
+      "Café Bustelo",
+      "Cafe Bustelo",
+      "Hostess",
+      "Twinkies",
+      "Voortman",
+      "Santa Cruz Organic"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.jmsmucker.com/contact-us",
+    "phone": null
+  },
+  {
+    "brand": "Bimbo Bakeries USA",
+    "aliases": [
+      "Bimbo",
+      "Bimbo Bakeries",
+      "Bimbo Bakeries USA",
+      "Thomas'",
+      "Thomas' English Muffins",
+      "Entenmann's",
+      "Sara Lee",
+      "Arnold",
+      "Brownberry",
+      "Oroweat",
+      "Ball Park",
+      "Boboli",
+      "Lender's",
+      "Marinela",
+      "Takis",
+      "Barcel",
+      "Little Bites"
+    ],
+    "contact_type": "email",
+    "email": "crelations@grupobimbo.com",
+    "contact_url": "https://bimbobakeriesusa.com/consumer-questions-feedback",
+    "phone": "1-800-984-0989"
+  },
+  {
+    "brand": "Pepperidge Farm",
+    "aliases": [
+      "Pepperidge Farm",
+      "Goldfish",
+      "Milano",
+      "Chessmen",
+      "Farmhouse Bread"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.pepperidgefarm.com/contact-us/",
+    "phone": null
+  },
+  {
+    "brand": "Sargento",
+    "aliases": [
+      "Sargento",
+      "Sargento Foods",
+      "Balanced Breaks"
+    ],
+    "contact_type": "email",
+    "email": "Ask_Us@sargento.com",
+    "contact_url": "https://www.sargento.com/contact-us",
+    "phone": "1-800-243-3737"
+  },
+  {
+    "brand": "Land O'Lakes",
+    "aliases": [
+      "Land O'Lakes",
+      "Land O Lakes",
+      "Land OLakes",
+      "Alpine Lace",
+      "Vermont Creamery"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://www.landolakes.com/contact-us/",
+    "phone": "1-800-328-4155"
+  },
+  {
+    "brand": "Horizon Organic",
+    "aliases": [
+      "Horizon",
+      "Horizon Organic"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://horizon.com/contact-us/",
+    "phone": "1-888-494-3020"
+  },
+  {
+    "brand": "Simple Mills",
+    "aliases": [
+      "Simple Mills"
+    ],
+    "contact_type": "email",
+    "email": "info@simplemills.com",
+    "contact_url": "https://simplemills.com/Company/Contact-Us.aspx",
+    "phone": "1-312-410-8414"
+  },
+  {
+    "brand": "Amy's Kitchen",
+    "aliases": [
+      "Amy's",
+      "Amys",
+      "Amy's Kitchen"
+    ],
+    "contact_type": "email",
+    "email": "contactus@amys.com",
+    "contact_url": "https://www.amys.com/faqs",
+    "phone": "1-707-781-7535"
+  },
+  {
+    "brand": "KIND Snacks",
+    "aliases": [
+      "KIND",
+      "KIND Snacks",
+      "Kind Bars",
+      "KIND Healthy Snacks"
+    ],
+    "contact_type": "email",
+    "email": "customerservice@kindsnacks.com",
+    "contact_url": "https://www.kindsnacks.com/faq-contact",
+    "phone": "1-855-885-5463"
+  },
+  {
+    "brand": "Costco / Kirkland Signature",
+    "aliases": [
+      "Kirkland Signature",
+      "Kirkland",
+      "Costco",
+      "Costco Wholesale"
+    ],
+    "contact_type": "web_form",
+    "email": null,
+    "contact_url": "https://customerservice.costco.com/",
+    "phone": "1-800-774-2678"
+  }
+]

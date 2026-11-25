@@ -89,7 +89,7 @@ def test_product_and_brand_cooldown_warnings(seeded_conn) -> None:
         name="Three Cheese Shells",
         brand="Kraft",
         raw_ingredients="PASTA, CHEDDAR CHEESE (MILK, ENZYMES, SALT).",
-        brand_contact_email="consumer.relations@kraftheinz.example.com",
+        brand_contact_url="https://contactus.kraftheinz.com/en-us",
     )
     brand_draft = generate_outreach_draft(
         seeded_conn,
@@ -119,11 +119,11 @@ def test_reformulation_outreach_mentions_diff_and_lot_code(seeded_conn) -> None:
 
 def test_mailto_rfc2368_encoding() -> None:
     url = build_mailto_url(
-        "consumer.relations@kraftheinz.example.com",
+        "help@goodles.com",
         "Ingredient Inquiry: Mac & Cheese (UPC 021000658831)",
         "Hello team,\nPlease confirm enzymes & whey.",
     )
-    assert url.startswith("mailto:consumer.relations@kraftheinz.example.com?subject=")
+    assert url.startswith("mailto:help@goodles.com?subject=")
     assert "+" not in url  # RFC 2368 uses %20, not +
     assert "%20" in url
     assert "%26" in url

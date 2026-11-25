@@ -37,9 +37,11 @@ import {
   liveRedditForumScan,
   loadPersistedState,
   makeProductFromLookup,
+  normalizeBrandKey,
   parseBackupFile,
   runUpcWaterfall,
   savePersistedState,
+  upsertSavedBrandContact,
   verifyServerPasscode,
   type PersistedState,
 } from './engine/store';
@@ -151,6 +153,7 @@ export default function App() {
       const res = await runUpcWaterfall({
         rawInput: digits,
         products: persisted.products,
+        brandContacts: persisted.brandContacts,
         usdaApiKey: persisted.usdaApiKey,
         onSteps: (steps) => setTrace({ digits, steps }),
       });
@@ -173,7 +176,15 @@ export default function App() {
         setTrace({ digits, steps: res.steps, notFound: true });
       }
     },
-    [upcDraft, persisted.products, persisted.usdaApiKey, recordHistory, openProduct, showToast]
+    [
+      upcDraft,
+      persisted.products,
+      persisted.brandContacts,
+      persisted.usdaApiKey,
+      recordHistory,
+      openProduct,
+      showToast,
+    ]
   );
 
   const handlePhotoFile = useCallback(
@@ -241,32 +252,76 @@ export default function App() {
     [showToast]
   );
 
-  const handleMarkOutreachSent = useCallback(
-    (pid: string, to: string, subject: string, body: string, mode: 'full' | 'quick') => {
+  const handleSaveBrandContact = useCallback(
+    (
+      brand: string,
+      contact: { email: string; contact_url: string; phone?: string | null }
+    ) => {
+      const targetKey = normalizeBrandKey(brand);
       setPersisted((prev) => ({
         ...prev,
-        products: prev.products.map((p) => {
-          if (p.id !== pid) return p;
-          const cur = p.snapshots.find((s) => s.is_current) || p.snapshots[p.snapshots.length - 1];
-          return {
-            ...p,
-            email: to || p.email,
-            outreach: [
-              {
-                id: uid('o'),
-                snap: cur?.id || '',
-                to,
-                subject,
-                body,
-                mode,
-                state: 'sent',
-                created_at: new Date().toISOString(),
-              },
-              ...p.outreach,
-            ],
-          };
-        }),
+        brandContacts: upsertSavedBrandContact(prev.brandContacts, brand, contact),
+        products: targetKey
+          ? prev.products.map((p) =>
+              normalizeBrandKey(p.brand) === targetKey
+                ? {
+                    ...p,
+                    email: contact.email.trim(),
+                    contact_url: contact.contact_url.trim(),
+                  }
+                : p
+            )
+          : prev.products,
       }));
+    },
+    []
+  );
+
+  const handleMarkOutreachSent = useCallback(
+    (
+      pid: string,
+      to: string,
+      contactUrl: string,
+      subject: string,
+      body: string,
+      mode: 'full' | 'quick'
+    ) => {
+      setPersisted((prev) => {
+        const target = prev.products.find((p) => p.id === pid);
+        const nextBook =
+          target && (to.trim() || contactUrl.trim())
+            ? upsertSavedBrandContact(prev.brandContacts, target.brand, {
+                email: to,
+                contact_url: contactUrl,
+              })
+            : prev.brandContacts;
+        return {
+          ...prev,
+          brandContacts: nextBook,
+          products: prev.products.map((p) => {
+            if (p.id !== pid) return p;
+            const cur = p.snapshots.find((s) => s.is_current) || p.snapshots[p.snapshots.length - 1];
+            return {
+              ...p,
+              email: to || p.email,
+              contact_url: contactUrl || p.contact_url,
+              outreach: [
+                {
+                  id: uid('o'),
+                  snap: cur?.id || '',
+                  to: to || contactUrl,
+                  subject,
+                  body,
+                  mode,
+                  state: 'sent',
+                  created_at: new Date().toISOString(),
+                },
+                ...p.outreach,
+              ],
+            };
+          }),
+        };
+      });
       showToast('Marked as sent.');
     },
     [showToast]
@@ -402,6 +457,7 @@ export default function App() {
         vegan: payload.vegan,
         sourceKind: 'manual',
         sourceLabel: 'Added by you',
+        brandContacts: persisted.brandContacts,
       });
       setPersisted((prev) => ({ ...prev, products: [created, ...prev.products] }));
       recordHistory(created);
@@ -409,7 +465,7 @@ export default function App() {
       openProduct(created.id);
       showToast(`Saved ${created.brand} ${created.name}.`);
     },
-    [recordHistory, openProduct, showToast]
+    [persisted.brandContacts, recordHistory, openProduct, showToast]
   );
 
   const handleAddPolicy = useCallback(
@@ -674,10 +730,13 @@ export default function App() {
               <DraftEmailSheet
                 ev={ev}
                 allProducts={persisted.products}
+                brandContacts={persisted.brandContacts}
+                appMode={appMode}
                 mode={sheet.mode}
                 sigId={sheet.sigId}
-                onMarkSent={(to, subj, body, mode) =>
-                  handleMarkOutreachSent(ev.p.id, to, subj, body, mode)
+                onSaveBrandContact={handleSaveBrandContact}
+                onMarkSent={(to, contactUrl, subj, body, mode) =>
+                  handleMarkOutreachSent(ev.p.id, to, contactUrl, subj, body, mode)
                 }
                 onClose={() => setSheet(null)}
                 onToast={showToast}
@@ -772,6 +831,7 @@ export default function App() {
               setPersisted({
                 products: createSeedProducts(),
                 policies: JSON.parse(JSON.stringify(SEED_POLICIES)),
+                brandContacts: {},
                 strict: { ...DEFAULT_STRICT },
                 history: [],
                 usdaApiKey: '',

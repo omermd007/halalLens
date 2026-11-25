@@ -654,8 +654,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol="OU-D",
         is_certified_vegan=False,
-        brand_contact_email="consumer.relations@kraftheinz.example.com",
-        brand_contact_url="https://www.kraftheinz.com/contact-us",
+        brand_contact_email=None,
+        brand_contact_url="https://contactus.kraftheinz.com/en-us",
         created_at=iso_ts(45),
         updated_at=iso_ts(4),
     )
@@ -790,8 +790,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol=None,
         is_certified_vegan=False,
-        brand_contact_email="contact@annies.example.com",
-        brand_contact_url="https://www.annies.com/contact-us",
+        brand_contact_email=None,
+        brand_contact_url="https://ask.generalmills.com/s/",
         created_at=iso_ts(50),
         updated_at=iso_ts(8),
     )
@@ -823,8 +823,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
             "enzymes",
             "plant_or_microbial",
             0,
-            "email",
-            "contact@annies.example.com",
+            "web_form",
+            "General Mills / Annie's Consumer Services",
             (
                 "[Illustrative prototype seed] General Mills / Annie's confirmed all enzymes "
                 "used in Shells & Real Aged Cheddar are 100% microbial/non-animal across U.S. plants."
@@ -881,8 +881,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol=None,
         is_certified_vegan=False,
-        brand_contact_email="hello@goodles.example.com",
-        brand_contact_url="https://www.goodles.com/pages/contact",
+        brand_contact_email="help@goodles.com",
+        brand_contact_url="https://www.goodles.com/contact/",
         created_at=iso_ts(180),
         updated_at=iso_ts(3),
     )
@@ -931,7 +931,7 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
                 "plant_or_microbial",
                 0,
                 "email",
-                "hello@goodles.example.com",
+                "help@goodles.com",
                 (
                     f"[Illustrative prototype seed] Goodles confirmed {ing_name} in the prior "
                     f"Cheddy Mac formulation (lot GL-2601A) was 100% microbial/vegetarian."
@@ -956,7 +956,7 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
             "out_goodles_drift_1",
             "prod_goodles_cheddy",
             "snap_goodles_v2",
-            "hello@goodles.example.com",
+            "help@goodles.com",
             json.dumps(["cheese culture", "enzymes", "mono- and diglycerides", "natural flavors", "whey"]),
             "Ingredient Source Inquiry: Goodles Cheddy Mac (UPC 850031990012)",
             (
@@ -988,8 +988,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status="active",
         kosher_symbol=None,
         is_certified_vegan=False,
-        brand_contact_email="info@saffronroad.example.com",
-        brand_contact_url="https://www.saffronroad.com/pages/contact-us",
+        brand_contact_email="customerservice@saffronroad.com",
+        brand_contact_url="https://www.saffronroad.com/pages/contact",
         created_at=iso_ts(40),
         updated_at=iso_ts(12),
     )
@@ -1022,8 +1022,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol=None,
         is_certified_vegan=False,
-        brand_contact_email="info-us@haribo.example.com",
-        brand_contact_url="https://www.haribo.com/en-us/contact",
+        brand_contact_email=None,
+        brand_contact_url="https://www.haribo.com/en-us/about-us/contact",
         created_at=iso_ts(60),
         updated_at=iso_ts(7),
     )
@@ -1056,7 +1056,7 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
             "animal_or_haram",
             0,
             "faq",
-            "info-us@haribo.example.com",
+            "Haribo of America Consumer Care",
             (
                 "[Illustrative prototype seed] Haribo USA confirms standard U.S. retail Goldbears "
                 "contain pork-derived (porcine) gelatin and are not halal certified."
@@ -1114,8 +1114,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol="OU-Pareve",
         is_certified_vegan=True,
-        brand_contact_email="contact@traderjoes.example.com",
-        brand_contact_url="https://www.traderjoes.com/home/contact-us",
+        brand_contact_email=None,
+        brand_contact_url="https://www.traderjoes.com/home/contact-us/product-feedback.html",
         created_at=iso_ts(35),
         updated_at=iso_ts(14),
     )
@@ -1146,8 +1146,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol="OU-D",
         is_certified_vegan=False,
-        brand_contact_email="consumer.relations@mondelez.example.com",
-        brand_contact_url="https://www.mondelezinternational.com/contact-us",
+        brand_contact_email=None,
+        brand_contact_url="https://www.mondelezinternational.com/contact-us/consumers/",
         created_at=iso_ts(30),
         updated_at=iso_ts(5),
     )
@@ -1181,8 +1181,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
             "natural flavors",
             "varies_by_supplier",
             1,
-            "email",
-            "consumer.relations@mondelez.example.com",
+            "web_form",
+            "Mondelez U.S. Consumer Care",
             (
                 "[Illustrative prototype seed] Mondelez U.S. consumer relations noted that "
                 "flavor carriers for natural flavors can vary by U.S. plant/supplier and cannot "
@@ -1210,8 +1210,8 @@ def _seed_products_and_records(conn: sqlite3.Connection, now: datetime) -> None:
         certifier_status=None,
         kosher_symbol="OU-D",
         is_certified_vegan=False,
-        brand_contact_email="info@cabotcreamery.example.com",
-        brand_contact_url="https://cabotcreamery.com/pages/contact-us",
+        brand_contact_email="info@cabotcheese.com",
+        brand_contact_url="https://cabotcreamery.gorgias.help/en-US",
         created_at=iso_ts(25),
         updated_at=iso_ts(9),
     )

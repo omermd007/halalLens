@@ -235,4 +235,19 @@ export const api = {
       body: JSON.stringify(profile),
     });
   },
+
+  lookupBrandContact(brand: string): Promise<{
+    brand: string;
+    matched_query: string;
+    source: 'verified_directory' | 'web_lookup' | 'not_found';
+    verified: boolean;
+    contact_type: 'email' | 'web_form' | 'unknown';
+    email: string | null;
+    contact_url: string | null;
+    phone: string | null;
+    search_url: string;
+    note: string | null;
+  }> {
+    return apiRequest(`/api/brands/lookup-contact?brand=${encodeURIComponent(brand.trim())}`);
+  },
 };

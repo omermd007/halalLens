@@ -223,3 +223,46 @@ export interface OffCacheItem {
 export type ViewName = 'scan' | 'product' | 'label' | 'todo' | 'learn';
 
 export type AppMode = 'standalone' | 'api';
+
+export type BrandContactType = 'email' | 'web_form';
+
+export interface BrandDirectoryEntry {
+  brand: string;
+  aliases: string[];
+  contact_type: BrandContactType;
+  email: string | null;
+  contact_url: string;
+  phone?: string | null;
+}
+
+export interface SavedBrandContact {
+  brand: string;
+  email: string;
+  contact_url: string;
+  phone?: string | null;
+  updated_at: string;
+}
+
+export interface ResolvedBrandContact {
+  brand: string;
+  source: 'saved' | 'directory' | 'product' | 'unknown';
+  contact_type: BrandContactType | 'unknown';
+  email: string;
+  contact_url: string;
+  phone: string | null;
+  matchedParent: string | null;
+}
+
+export interface BrandContactLookupResult {
+  brand: string;
+  matched_query: string;
+  source: 'verified_directory' | 'web_lookup' | 'not_found';
+  verified: boolean;
+  contact_type: BrandContactType | 'unknown';
+  email: string | null;
+  contact_url: string | null;
+  phone: string | null;
+  search_url: string;
+  note: string | null;
+}
+

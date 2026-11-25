@@ -313,7 +313,14 @@ def generate_outreach_draft(
 
     target_flags = _select_target_flags(detail)
     unresolved_names = [f.canonical_name for f in target_flags]
-    resolved_email = (target_email or detail.brand_contact_email or "").strip() or None
+    raw_email = (target_email or detail.brand_contact_email or "").strip()
+    if not raw_email:
+        from app.services import brand_contacts
+
+        dir_match = brand_contacts.lookup_directory_contact(detail.brand)
+        if dir_match and dir_match.get("email"):
+            raw_email = str(dir_match["email"]).strip()
+    resolved_email = raw_email or None
 
     normalized_mode = (
         "quick_confirmation" if mode == "quick_confirmation" else "full_inquiry"

@@ -17,6 +17,7 @@ COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./
+COPY frontend/src/data/brandContacts.json /app/frontend/src/data/brandContacts.json
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 RUN mkdir -p /data

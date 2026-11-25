@@ -7,11 +7,12 @@ import json
 import sqlite3
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import Field
 
 from app import db
 from app.schemas import (
+    BrandContactLookupResponse,
     BrandPolicy,
     BrandPolicyCreateRequest,
     BrandPolicyListResponse,
@@ -25,7 +26,7 @@ from app.schemas import (
     ReviewQueueResponse,
     VerificationCreateRequest,
 )
-from app.services import outreach, status_engine
+from app.services import brand_contacts, outreach, status_engine
 
 router = APIRouter(prefix="/api", tags=["verification"])
 
@@ -282,3 +283,19 @@ def create_brand_policy(
 
     today = datetime.now(timezone.utc).date()
     return status_engine._dict_to_brand_policy(inserted, today)
+
+
+@router.get("/brands/lookup-contact", response_model=BrandContactLookupResponse)
+def lookup_brand_contact_route(
+    brand: str = Query(..., min_length=1, max_length=120, description="Brand or sub-brand name to look up"),
+    allow_web: bool = Query(default=True, description="Whether to perform a safe server-side web lookup if not in the verified directory"),
+) -> BrandContactLookupResponse:
+    """Resolve official U.S. consumer-care contact info from the verified directory or safe web lookup."""
+    cleaned = brand.strip()
+    if not cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="brand query parameter is required.",
+        )
+    return brand_contacts.lookup_brand_contact(cleaned, allow_web=allow_web)
+

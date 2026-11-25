@@ -139,7 +139,7 @@ def test_scan_missing_upc_then_create_product_and_duplicate_409(
         "raw_ingredients": "POPCORN, VEGETABLE OIL, CHEDDAR CHEESE (MILK, CHEESE CULTURES, SALT, ENZYMES), WHEY.",
         "kosher_symbol": "OU-D",
         "is_certified_vegan": False,
-        "brand_contact_email": "help@smarttest.example.com",
+        "brand_contact_email": "help@smarttest.test",
     }
     created = client.post("/api/products", json=create_payload)
     assert created.status_code == 201
@@ -204,8 +204,8 @@ def test_verifications_transition_kraft_to_green_and_supplier_variability_keeps_
             "ingredient_name": "enzymes",
             "determination": "plant_or_microbial",
             "varies_by_supplier": False,
-            "contact_channel": "email",
-            "company_contact": "consumer.relations@kraftheinz.example.com",
+            "contact_channel": "web_form",
+            "company_contact": "Kraft Heinz Consumer Care",
             "response_excerpt": "Enzymes are 100% microbial across all U.S. plants.",
             "expires_months": 12,
             "outreach_inquiry_id": inquiry_id,

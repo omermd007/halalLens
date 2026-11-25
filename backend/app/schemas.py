@@ -474,3 +474,17 @@ class BrandPolicyCreateRequest(BaseModel):
     excerpt: str
     checked_date: str | None = None
     expires_at: str | None = None
+
+
+class BrandContactLookupResponse(BaseModel):
+    brand: str
+    matched_query: str
+    source: Literal["verified_directory", "web_lookup", "not_found"]
+    verified: bool = False
+    contact_type: Literal["email", "web_form", "unknown"] = "unknown"
+    email: str | None = None
+    contact_url: str | None = None
+    phone: str | None = None
+    search_url: str
+    note: str | None = None
+

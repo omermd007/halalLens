@@ -1,19 +1,27 @@
+import brandContactsRaw from '../data/brandContacts.json';
 import offCacheRaw from '../data/offCache.json';
 import { digitsOf, parseForumPost, todayISO, uid, upcVariants } from './evaluator';
 import { createSeedProducts, DEFAULT_STRICT, SEED_POLICIES } from './seeds';
 import type {
   AppMode,
+  BrandContactLookupResult,
+  BrandDirectoryEntry,
   BrandPolicyRecord,
   ForumSignalItem,
   HistoryItem,
   LookupStep,
   OffCacheItem,
   ProductRecord,
+  ResolvedBrandContact,
+  SavedBrandContact,
   StrictnessSettings,
 } from './types';
 
 export const OFF_CACHE: OffCacheItem[] = offCacheRaw as OffCacheItem[];
 export const CACHE_COUNT = OFF_CACHE.length;
+
+export const BRAND_CONTACTS_DIRECTORY: BrandDirectoryEntry[] =
+  brandContactsRaw as BrandDirectoryEntry[];
 
 const CACHE_INDEX = new Map<string, OffCacheItem>();
 for (const item of OFF_CACHE) {
@@ -25,9 +33,245 @@ for (const item of OFF_CACHE) {
 export const STORE_KEY = 'halallens.v4';
 const PASSCODE_SESSION_KEY = 'halallens.passcode';
 
+export function normalizeBrandKey(brand: string): string {
+  if (!brand) return '';
+  return brand
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/['’`]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export function isPlaceholderEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const low = email.trim().toLowerCase();
+  if (!low) return false;
+  const at = low.lastIndexOf('@');
+  if (at < 0) return false;
+  const domain = low.slice(at + 1);
+  return (
+    domain === 'example.com' ||
+    domain.endsWith('.example.com') ||
+    domain === 'example.org' ||
+    domain.endsWith('.example.org') ||
+    domain === 'example.net' ||
+    domain.endsWith('.example.net')
+  );
+}
+
+export function matchBrandDirectory(brand: string): BrandDirectoryEntry | null {
+  const query = normalizeBrandKey(brand);
+  if (!query) return null;
+
+  // 1. Exact normalized match against brand or aliases.
+  for (const entry of BRAND_CONTACTS_DIRECTORY) {
+    const names = [entry.brand, ...(entry.aliases || [])];
+    for (const candidate of names) {
+      if (normalizeBrandKey(candidate) === query) {
+        return entry;
+      }
+    }
+  }
+
+  // 2. Word-boundary match (longest alias wins to avoid false positives).
+  let best: BrandDirectoryEntry | null = null;
+  let bestScore = 0;
+  const paddedQuery = ` ${query} `;
+  for (const entry of BRAND_CONTACTS_DIRECTORY) {
+    const names = [entry.brand, ...(entry.aliases || [])];
+    for (const candidate of names) {
+      const norm = normalizeBrandKey(candidate);
+      if (!norm || norm.length < 3) continue;
+      const paddedCand = ` ${norm} `;
+      if (paddedQuery.includes(paddedCand)) {
+        const score = norm.length + 100;
+        if (score > bestScore) {
+          bestScore = score;
+          best = entry;
+        }
+      } else if (query.length >= 4 && paddedCand.includes(paddedQuery)) {
+        const score = query.length;
+        if (score > bestScore) {
+          bestScore = score;
+          best = entry;
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+export function resolveBrandContact(
+  brand: string,
+  savedBook: Record<string, SavedBrandContact>,
+  productEmail?: string,
+  productContactUrl?: string
+): ResolvedBrandContact {
+  const key = normalizeBrandKey(brand);
+  const dirEntry = matchBrandDirectory(brand);
+  const parentKey = dirEntry ? normalizeBrandKey(dirEntry.brand) : '';
+
+  const saved = (key && savedBook[key]) || (parentKey && savedBook[parentKey]) || null;
+  const savedEmail = saved && !isPlaceholderEmail(saved.email) ? saved.email.trim() : '';
+  const savedUrl = saved?.contact_url?.trim() || '';
+
+  if (saved && (savedEmail || savedUrl)) {
+    const mergedUrl = savedUrl || dirEntry?.contact_url || (productContactUrl || '').trim();
+    const mergedPhone = saved.phone || dirEntry?.phone || null;
+    return {
+      brand: saved.brand || brand,
+      source: 'saved',
+      contact_type: savedEmail ? 'email' : 'web_form',
+      email: savedEmail,
+      contact_url: mergedUrl,
+      phone: mergedPhone,
+      matchedParent: dirEntry?.brand || null,
+    };
+  }
+
+  if (dirEntry) {
+    const dirEmail = dirEntry.email && !isPlaceholderEmail(dirEntry.email) ? dirEntry.email.trim() : '';
+    return {
+      brand: dirEntry.brand,
+      source: 'directory',
+      contact_type: dirEmail ? 'email' : dirEntry.contact_type,
+      email: dirEmail,
+      contact_url: dirEntry.contact_url || '',
+      phone: dirEntry.phone || null,
+      matchedParent: dirEntry.brand,
+    };
+  }
+
+  const cleanProdEmail =
+    productEmail && !isPlaceholderEmail(productEmail) ? productEmail.trim() : '';
+  const cleanProdUrl = (productContactUrl || '').trim();
+  if (cleanProdEmail || cleanProdUrl) {
+    return {
+      brand,
+      source: 'product',
+      contact_type: cleanProdEmail ? 'email' : 'web_form',
+      email: cleanProdEmail,
+      contact_url: cleanProdUrl,
+      phone: null,
+      matchedParent: null,
+    };
+  }
+
+  return {
+    brand,
+    source: 'unknown',
+    contact_type: 'unknown',
+    email: '',
+    contact_url: '',
+    phone: null,
+    matchedParent: null,
+  };
+}
+
+export function upsertSavedBrandContact(
+  book: Record<string, SavedBrandContact>,
+  brand: string,
+  contact: { email: string; contact_url: string; phone?: string | null }
+): Record<string, SavedBrandContact> {
+  const key = normalizeBrandKey(brand);
+  if (!key) return book;
+  const cleanEmail = isPlaceholderEmail(contact.email) ? '' : contact.email.trim();
+  const cleanUrl = contact.contact_url.trim();
+  const next = { ...book };
+  if (!cleanEmail && !cleanUrl) {
+    delete next[key];
+    return next;
+  }
+  next[key] = {
+    brand: brand.trim() || book[key]?.brand || brand,
+    email: cleanEmail,
+    contact_url: cleanUrl,
+    phone: contact.phone ?? book[key]?.phone ?? null,
+    updated_at: new Date().toISOString(),
+  };
+  return next;
+}
+
+export function buildBrandSearchUrl(brand: string): string {
+  const q = `"${brand.trim()}" consumer care OR customer support contact email`;
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+}
+
+export async function lookupBrandContactFromApi(
+  brand: string
+): Promise<BrandContactLookupResult | null> {
+  try {
+    const passcode = getSavedPasscode();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(
+      `/api/brands/lookup-contact?brand=${encodeURIComponent(brand.trim())}`,
+      {
+        signal: ctrl.signal,
+        headers: {
+          Accept: 'application/json',
+          ...(passcode ? { 'X-Passcode': passcode } : {}),
+        },
+      }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return (await res.json()) as BrandContactLookupResult;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeProductContacts(products: ProductRecord[]): ProductRecord[] {
+  return products.map((p) => {
+    const hasPlaceholder = isPlaceholderEmail(p.email);
+    const dir = matchBrandDirectory(p.brand);
+    const cleanOutreach = Array.isArray(p.outreach)
+      ? p.outreach.map((o) =>
+          isPlaceholderEmail(o.to) ? { ...o, to: dir?.email || '' } : o
+        )
+      : [];
+    if (!hasPlaceholder && cleanOutreach === p.outreach) return p;
+    const nextEmail = hasPlaceholder ? dir?.email || '' : p.email;
+    const nextUrl =
+      hasPlaceholder && dir?.contact_url ? dir.contact_url : p.contact_url;
+    return {
+      ...p,
+      email: nextEmail,
+      contact_url: nextUrl,
+      outreach: cleanOutreach,
+    };
+  });
+}
+
+function sanitizeSavedBrandContacts(
+  raw: Record<string, SavedBrandContact> | undefined
+): Record<string, SavedBrandContact> {
+  if (!raw || typeof raw !== 'object') return {};
+  const cleaned: Record<string, SavedBrandContact> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!v || typeof v !== 'object') continue;
+    const email = isPlaceholderEmail(v.email) ? '' : String(v.email || '').trim();
+    const contact_url = String(v.contact_url || '').trim();
+    if (!email && !contact_url) continue;
+    cleaned[k] = {
+      brand: String(v.brand || k),
+      email,
+      contact_url,
+      phone: v.phone ? String(v.phone) : null,
+      updated_at: String(v.updated_at || new Date().toISOString()),
+    };
+  }
+  return cleaned;
+}
+
 export interface PersistedState {
   products: ProductRecord[];
   policies: BrandPolicyRecord[];
+  brandContacts: Record<string, SavedBrandContact>;
   strict: StrictnessSettings;
   history: HistoryItem[];
   usdaApiKey: string;
@@ -38,6 +282,7 @@ export function loadPersistedState(): PersistedState {
   const defaults: PersistedState = {
     products: createSeedProducts(),
     policies: JSON.parse(JSON.stringify(SEED_POLICIES)),
+    brandContacts: {},
     strict: { ...DEFAULT_STRICT },
     history: [],
     usdaApiKey: '',
@@ -48,8 +293,11 @@ export function loadPersistedState(): PersistedState {
     if (!raw) return defaults;
     const d = JSON.parse(raw) as Partial<PersistedState>;
     return {
-      products: Array.isArray(d.products) ? d.products : defaults.products,
+      products: Array.isArray(d.products)
+        ? sanitizeProductContacts(d.products)
+        : defaults.products,
       policies: Array.isArray(d.policies) ? d.policies : defaults.policies,
+      brandContacts: sanitizeSavedBrandContacts(d.brandContacts),
       strict: d.strict ? { ...DEFAULT_STRICT, ...d.strict } : defaults.strict,
       history: Array.isArray(d.history) ? d.history : [],
       usdaApiKey: typeof d.usdaApiKey === 'string' ? d.usdaApiKey : '',
@@ -166,8 +414,10 @@ export function makeProductFromLookup(o: {
   kosher?: string | null;
   sourceKind: string;
   sourceLabel: string;
+  brandContacts?: Record<string, SavedBrandContact>;
 }): ProductRecord {
   const sid = uid('s');
+  const resolved = resolveBrandContact(o.brand || '', o.brandContacts || {});
   return {
     id: uid('p'),
     upc: o.upc,
@@ -177,8 +427,8 @@ export function makeProductFromLookup(o: {
     cert: o.cert || (o.halal ? 'Halal label (confirm symbol on package)' : null),
     kosher: normKosher(o.kosher),
     vegan: Boolean(o.vegan),
-    email: '',
-    contact_url: '',
+    email: resolved.email,
+    contact_url: resolved.contact_url,
     source: { kind: o.sourceKind, label: o.sourceLabel },
     snapshots: [
       {
@@ -260,6 +510,7 @@ async function liveUSDA(digits: string, apiKey: string) {
 export async function runUpcWaterfall(params: {
   rawInput: string;
   products: ProductRecord[];
+  brandContacts?: Record<string, SavedBrandContact>;
   usdaApiKey: string;
   onSteps: (steps: LookupStep[]) => void;
 }): Promise<{ product: ProductRecord | null; imported: boolean; steps: LookupStep[] }> {
@@ -299,6 +550,7 @@ export async function runUpcWaterfall(params: {
       ...cacheHit,
       sourceKind: 'off_cache',
       sourceLabel: 'Open Food Facts (offline U.S. catalog)',
+      brandContacts: params.brandContacts,
     });
     steps[1] = { ...steps[1], state: 'hit', detail: `Found: ${imported.brand} ${imported.name}` };
     emit();
@@ -316,6 +568,7 @@ export async function runUpcWaterfall(params: {
         ...hit,
         sourceKind: 'off_live',
         sourceLabel: 'Open Food Facts (live)',
+        brandContacts: params.brandContacts,
       });
       steps[2] = { ...steps[2], state: 'hit', detail: `Found: ${imported.brand} ${imported.name}` };
       emit();
@@ -337,6 +590,7 @@ export async function runUpcWaterfall(params: {
         ...hit,
         sourceKind: 'usda_live',
         sourceLabel: 'USDA FoodData Central (live)',
+        brandContacts: params.brandContacts,
       });
       steps[3] = { ...steps[3], state: 'hit', detail: `Found: ${imported.brand} ${imported.name}` };
       emit();
@@ -421,8 +675,9 @@ export async function parseBackupFile(file: File): Promise<PersistedState> {
     throw new Error('This file does not look like a HalalLens backup.');
   }
   return {
-    products: d.products,
+    products: sanitizeProductContacts(d.products),
     policies: Array.isArray(d.policies) ? d.policies : [],
+    brandContacts: sanitizeSavedBrandContacts(d.brandContacts),
     strict: d.strict ? { ...DEFAULT_STRICT, ...d.strict } : { ...DEFAULT_STRICT },
     history: Array.isArray(d.history) ? d.history : [],
     usdaApiKey: typeof d.usdaApiKey === 'string' ? d.usdaApiKey : '',
