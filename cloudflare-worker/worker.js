@@ -496,7 +496,79 @@ async function searchReddit(brand, shortProduct, env, fetchImpl = fetch) {
     // fall through
   }
 
-  // 1c. Public Reddit search JSON fallback
+  // 1c. PullPush public Reddit archive (zero-key, cloud-friendly)
+  try {
+    const brandTokens = normalizeBrand(brand)
+      .split(' ')
+      .filter((t) => t.length >= 3 && !BRAND_STOPWORDS.has(t));
+    const pullQueries = [
+      `${brand} ${shortProduct} halal`.trim(),
+      `${brand} halal`.trim(),
+    ];
+    const seenUrls = new Set();
+    const pullResults = await Promise.allSettled(
+      pullQueries.map(async (q) => {
+        const url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(
+          q
+        )}&size=8&sort=desc`;
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 5000, fetchImpl);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data?.data) ? data.data : [];
+      })
+    );
+
+    for (const r of pullResults) {
+      if (r.status !== 'fulfilled') continue;
+      for (const post of r.value) {
+        if (!post || !post.title) continue;
+        const permalink = post.permalink
+          ? String(post.permalink).startsWith('http')
+            ? String(post.permalink)
+            : `https://www.reddit.com${post.permalink}`
+          : post.id
+          ? `https://www.reddit.com/r/${post.subreddit || 'reddit'}/comments/${post.id}/`
+          : null;
+        if (!permalink || seenUrls.has(permalink)) continue;
+
+        const hay = `${post.title || ''} ${post.selftext || ''}`.toLowerCase();
+        const mentionsBrand =
+          brandTokens.length === 0 || brandTokens.some((t) => hay.includes(t));
+        const subLow = String(post.subreddit || '').toLowerCase();
+        const relevantSub =
+          REDDIT_SUBREDDITS.some((s) => s.toLowerCase() === subLow) ||
+          ['kosher', 'vegan', 'food', 'cheese', 'islam', 'muslim', 'groceries', 'nutrition', 'glutenfree'].includes(
+            subLow
+          );
+        const hasDietaryHint =
+          /\b(halal|haram|mushbooh|zabiha|kosher|vegetarian|vegan|rennet|enzyme|gelatin|whey|pork|lard|alcohol|ethanol|ingredients?)\b/i.test(
+            hay
+          );
+
+        if (!mentionsBrand || (!relevantSub && !hasDietaryHint)) continue;
+        seenUrls.add(permalink);
+        items.push({
+          platform: 'reddit',
+          source: `r/${post.subreddit || 'reddit'}`,
+          url: permalink,
+          title: String(post.title || '').trim(),
+          author: post.author && post.author !== '[deleted]' ? `u/${post.author}` : null,
+          posted_at:
+            typeof post.created_utc === 'number'
+              ? new Date(post.created_utc * 1000).toISOString().slice(0, 10)
+              : null,
+          excerpt: String(post.selftext || post.title || '').trim().slice(0, 520),
+        });
+      }
+    }
+    if (items.length > 0) {
+      return { source: 'reddit_pullpush', status: 'ok', items: items.slice(0, 8) };
+    }
+  } catch {
+    // fall through
+  }
+
+  // 1d. Public Reddit search JSON fallback
   try {
     const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance&limit=6`;
     const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 4500, fetchImpl);
@@ -649,6 +721,51 @@ async function ddgWebSearch(query, fetchImpl = fetch) {
   return extractDdgResults(html).map((r) => ({ ...r, posted_at: null }));
 }
 
+export function extractBingRssResults(xmlText) {
+  const results = [];
+  const seen = new Set();
+  const itemRe = /<item>([\s\S]*?)<\/item>/gi;
+  let m;
+  while ((m = itemRe.exec(xmlText)) !== null) {
+    const block = m[1];
+    const titleM = block.match(/<title>([\s\S]*?)<\/title>/i);
+    const linkM = block.match(/<link>([\s\S]*?)<\/link>/i);
+    const descM = block.match(/<description>([\s\S]*?)<\/description>/i);
+    const targetUrl = linkM ? decodeHtmlEntities(linkM[1]).trim() : '';
+    if (!targetUrl || !isSafePublicUrl(targetUrl)) continue;
+    const root = registrableDomain(new URL(targetUrl).hostname);
+    if (AGGREGATOR_HOSTS.has(root) && root !== 'reddit.com') continue;
+    if (seen.has(targetUrl)) continue;
+    seen.add(targetUrl);
+    results.push({
+      url: targetUrl,
+      title: titleM ? stripTags(titleM[1]) : root,
+      snippet: descM ? stripTags(descM[1]) : '',
+      posted_at: null,
+    });
+    if (results.length >= 10) break;
+  }
+  return results;
+}
+
+async function bingRssSearch(query, fetchImpl = fetch) {
+  const url = `https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`;
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: {
+        Accept: 'application/rss+xml, application/xml, text/xml',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    },
+    4500,
+    fetchImpl
+  );
+  if (!res.ok) return [];
+  const xml = (await res.text()).slice(0, 200_000);
+  return extractBingRssResults(xml);
+}
+
 export function extractRelevantPageExcerpt(htmlText, brand, ingredients = []) {
   const cleanText = stripTags(htmlText);
   if (!cleanText) return '';
@@ -729,6 +846,20 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
     ]);
     if (gen.status === 'fulfilled') rawResults.push(...gen.value);
     if (dir.status === 'fulfilled') rawResults.push(...dir.value);
+
+    // Zero-key Bing RSS fallback when DuckDuckGo blocks cloud edge IPs
+    if (rawResults.length === 0) {
+      try {
+        const bingRows = await bingRssSearch(`${brand} ${shortProduct}`.trim(), fetchImpl);
+        const officialRows = bingRows.filter((r) => {
+          const { platform } = classifyWebResult(r.url, brand);
+          return platform === 'brand_faq' || platform === 'halal_directory';
+        });
+        rawResults.push(...officialRows.slice(0, 3));
+      } catch {
+        // ignore
+      }
+    }
   }
 
   const seen = new Set();
@@ -862,6 +993,42 @@ export function extractEmailAndPhoneFromHtml(htmlText, pageUrl) {
   return { email, phone };
 }
 
+function findSameDomainContactLink(htmlText, baseUrl) {
+  let base;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  const baseRoot = registrableDomain(base.hostname);
+  let best = null;
+  let bestScore = -1;
+
+  for (const m of htmlText.matchAll(/<a[^>]*href=["']([^"'#]+)["'][^>]*>/gi)) {
+    const rawHref = decodeHtmlEntities(m[1]).trim();
+    if (!rawHref || rawHref.startsWith('mailto:') || rawHref.startsWith('tel:') || rawHref.startsWith('javascript:')) {
+      continue;
+    }
+    let resolved;
+    try {
+      resolved = new URL(rawHref, base);
+    } catch {
+      continue;
+    }
+    if (!isSafePublicUrl(resolved.href)) continue;
+    if (registrableDomain(resolved.hostname) !== baseRoot) continue;
+    const path = resolved.pathname.toLowerCase();
+    let score = -1;
+    if (/\/(contact-us|contact|contactus|pages\/contact)\b/.test(path)) score = 10;
+    else if (/\/(support|help|customer-care|consumer-care|customer-service|faq)\b/.test(path)) score = 6;
+    if (score > bestScore && resolved.href !== base.href) {
+      bestScore = score;
+      best = resolved.href;
+    }
+  }
+  return best;
+}
+
 async function handleBrandContact(brand, env, fetchImpl = fetch) {
   const cleaned = brand.trim();
   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(
@@ -876,6 +1043,14 @@ async function handleBrandContact(brand, env, fetchImpl = fetch) {
       : await ddgWebSearch(query, fetchImpl);
   } catch {
     results = [];
+  }
+
+  if (results.length === 0 && !env.BRAVE_API_KEY) {
+    try {
+      results = await bingRssSearch(cleaned, fetchImpl);
+    } catch {
+      results = [];
+    }
   }
 
   const contactUrl = pickOfficialContactUrl(
@@ -911,6 +1086,28 @@ async function handleBrandContact(brand, env, fetchImpl = fetch) {
       finalUrl = pageRes.url || contactUrl;
       const html = (await pageRes.text()).slice(0, 220_000);
       ({ email, phone } = extractEmailAndPhoneFromHtml(html, finalUrl));
+
+      // If we landed on the brand homepage and didn't find a direct contact page/email yet, follow a same-domain /contact link
+      const subContactLink = findSameDomainContactLink(html, finalUrl);
+      if (subContactLink && (!email || new URL(finalUrl).pathname === '/')) {
+        try {
+          const subRes = await fetchWithTimeout(
+            subContactLink,
+            { headers: { Accept: 'text/html' } },
+            4000,
+            fetchImpl
+          );
+          if (subRes.ok && isSafePublicUrl(subRes.url || subContactLink)) {
+            finalUrl = subRes.url || subContactLink;
+            const subHtml = (await subRes.text()).slice(0, 220_000);
+            const subExtracted = extractEmailAndPhoneFromHtml(subHtml, finalUrl);
+            if (subExtracted.email) email = subExtracted.email;
+            if (!phone && subExtracted.phone) phone = subExtracted.phone;
+          }
+        } catch {
+          // keep homepage result
+        }
+      }
     }
   } catch {
     // Still return the official contact page URL even if fetching fails
