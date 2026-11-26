@@ -834,7 +834,7 @@ async function enrichTopWebItems(items, brand, ingredients, fetchImpl = fetch) {
 
 async function geminiGroundedWebSearch(brand, shortProduct, ingredients, env, fetchImpl = fetch) {
   const apiKey = env.GEMINI_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) return { items: [], error: null };
   const model = (env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
@@ -849,6 +849,14 @@ async function geminiGroundedWebSearch(brand, shortProduct, ingredients, env, fe
     `Give a concise 3-5 sentence factual summary citing only what is supported by the search results. If sources conflict or vary by supplier/facility, say so explicitly. Never guess.`,
   ].join(' ');
 
+  const generationConfig = {
+    temperature: 0.1,
+    maxOutputTokens: 600,
+  };
+  if (model.startsWith('gemini-2.5')) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  }
+
   const res = await fetchWithTimeout(
     url,
     {
@@ -860,20 +868,19 @@ async function geminiGroundedWebSearch(brand, shortProduct, ingredients, env, fe
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         tools: [{ google_search: {} }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 450,
-        },
+        generationConfig,
       }),
     },
-    8000,
+    14000,
     fetchImpl
   );
 
-  if (!res.ok) return [];
+  if (!res.ok) {
+    return { items: [], error: `http_${res.status}` };
+  }
   const data = await res.json();
   const candidate = data?.candidates?.[0];
-  if (!candidate) return [];
+  if (!candidate) return { items: [], error: 'no_candidate' };
 
   const summaryText = (candidate?.content?.parts || [])
     .map((p) => p?.text || '')
@@ -920,7 +927,7 @@ async function geminiGroundedWebSearch(brand, shortProduct, ingredients, env, fe
     if (results.length >= 8) break;
   }
 
-  return results;
+  return { items: results, error: results.length ? null : 'no_chunks' };
 }
 
 async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fetchImpl = fetch) {
@@ -932,25 +939,30 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
 
   let rawResults = [];
   let engine = 'ddg';
+  let geminiError = null;
 
   if (env.GEMINI_API_KEY) {
     engine = 'gemini_google_search';
     try {
-      const geminiRows = await geminiGroundedWebSearch(
+      const geminiRes = await geminiGroundedWebSearch(
         brand,
         shortProduct,
         ingredients,
         env,
         fetchImpl
       );
-      rawResults.push(...geminiRows);
-    } catch {
-      // fall through to Brave / DDG / Bing
+      if (geminiRes.items.length > 0) {
+        rawResults.push(...geminiRes.items);
+      } else {
+        geminiError = geminiRes.error || 'empty';
+      }
+    } catch (err) {
+      geminiError = err?.name === 'AbortError' ? 'timeout' : 'fetch_error';
     }
   }
 
   if (env.BRAVE_API_KEY) {
-    engine = engine === 'gemini_google_search' ? 'gemini_and_brave' : 'brave';
+    engine = rawResults.length > 0 ? 'gemini_and_brave' : 'brave';
     const [gen, dir] = await Promise.allSettled([
       braveWebSearch(generalQuery, env.BRAVE_API_KEY, 6, fetchImpl),
       braveWebSearch(directoryQuery, env.BRAVE_API_KEY, 5, fetchImpl),
@@ -958,6 +970,7 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
     if (gen.status === 'fulfilled') rawResults.push(...gen.value);
     if (dir.status === 'fulfilled') rawResults.push(...dir.value);
   } else if (rawResults.length === 0) {
+    engine = 'ddg';
     const [gen, dir] = await Promise.allSettled([
       ddgWebSearch(generalQuery, fetchImpl),
       ddgWebSearch(directoryQuery, fetchImpl),
@@ -1012,6 +1025,8 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
       ? 'gemini_and_brave_search'
       : engine === 'brave'
       ? 'brave_web_and_halal_sites'
+      : geminiError
+      ? `web_fallback_after_gemini_${geminiError}`
       : 'web_and_halal_sites';
 
   return {
@@ -1171,6 +1186,14 @@ async function geminiGroundedBrandContact(brand, env, fetchImpl = fetch) {
     `Return ONLY a compact JSON object with keys: "contact_url" (official contact/support URL or null), "email" (published support email on the brand's own domain, or null — NEVER guess or fabricate an email), "phone" (U.S. toll-free phone or null).`,
   ].join(' ');
 
+  const generationConfig = {
+    temperature: 0.0,
+    maxOutputTokens: 300,
+  };
+  if (model.startsWith('gemini-2.5')) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  }
+
   const res = await fetchWithTimeout(
     url,
     {
@@ -1182,13 +1205,10 @@ async function geminiGroundedBrandContact(brand, env, fetchImpl = fetch) {
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         tools: [{ google_search: {} }],
-        generationConfig: {
-          temperature: 0.0,
-          maxOutputTokens: 250,
-        },
+        generationConfig,
       }),
     },
-    7500,
+    12000,
     fetchImpl
   );
   if (!res.ok) return null;
