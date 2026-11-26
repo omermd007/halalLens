@@ -236,3 +236,111 @@ test('extractEmailAndPhoneFromHtml ranks consumer care email above generic info'
   const res = extractEmailAndPhoneFromHtml(html, 'https://acmedairy.com/contact');
   assert.equal(res.email, 'customercare@acmedairy.com');
 });
+
+test('GET /scan uses Gemini Google Search Grounding and classifies grounding redirect domains', async () => {
+  const mockFetch = async (url) => {
+    const u = String(url);
+    if (u.includes('generativelanguage.googleapis.com')) {
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: 'Cabot Creamery confirms all U.S. cheeses use microbial enzymes. Muslim Consumer Group lists Cabot cheeses as halal-friendly.',
+                  },
+                ],
+              },
+              groundingMetadata: {
+                groundingChunks: [
+                  {
+                    web: {
+                      uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc123',
+                      title: 'cabotcreamery.com',
+                    },
+                  },
+                  {
+                    web: {
+                      uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/def456',
+                      title: 'muslimconsumergroup.com',
+                    },
+                  },
+                ],
+                groundingSupports: [
+                  {
+                    segment: { text: 'Cabot Creamery confirms all U.S. cheeses use microbial enzymes.' },
+                    groundingChunkIndices: [0],
+                  },
+                  {
+                    segment: { text: 'Muslim Consumer Group lists Cabot cheeses as halal-friendly.' },
+                    groundingChunkIndices: [1],
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response(JSON.stringify({ data: [] }), { status: 200 });
+  };
+
+  const healthReq = new Request('https://halallens.workers.dev/health', {
+    headers: { Origin: 'https://omermd007.github.io' },
+  });
+  const healthRes = await handleRequest(healthReq, { GEMINI_API_KEY: 'test-gemini' }, null, mockFetch);
+  const healthBody = await healthRes.json();
+  assert.equal(healthBody.capabilities.gemini_google_search, true);
+
+  const scanReq = new Request(
+    'https://halallens.workers.dev/scan?brand=Cabot%20Creamery&product=Sharp%20Cheddar&ingredients=enzymes',
+    { headers: { Origin: 'https://omermd007.github.io' } }
+  );
+  const scanRes = await handleRequest(scanReq, { GEMINI_API_KEY: 'test-gemini' }, null, mockFetch);
+  assert.equal(scanRes.status, 200);
+  const body = await scanRes.json();
+  assert.equal(body.items.length, 2);
+  assert.equal(body.items[0].platform, 'brand_faq');
+  assert.match(body.items[0].excerpt, /microbial enzymes/i);
+  assert.equal(body.items[1].platform, 'halal_directory');
+  assert.equal(body.items[1].source, 'Muslim Consumer Group');
+});
+
+test('GET /brand-contact uses Gemini Google Search Grounding and enforces email safety', async () => {
+  const mockFetch = async (url) => {
+    const u = String(url);
+    if (u.includes('generativelanguage.googleapis.com')) {
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: '{"contact_url":"https://chomps.com/pages/contact","email":"support@chomps.com","phone":"1-800-555-0199"}',
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response('', { status: 404 });
+  };
+
+  const req = new Request('https://halallens.workers.dev/brand-contact?brand=Chomps', {
+    headers: { Origin: 'https://omermd007.github.io' },
+  });
+  const res = await handleRequest(req, { GEMINI_API_KEY: 'test-gemini' }, null, mockFetch);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.source, 'gemini_google_search');
+  assert.equal(body.contact_type, 'email');
+  assert.equal(body.email, 'support@chomps.com');
+  assert.equal(body.contact_url, 'https://chomps.com/pages/contact');
+});
+

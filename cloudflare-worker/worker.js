@@ -604,7 +604,7 @@ async function searchReddit(brand, shortProduct, env, fetchImpl = fetch) {
 // Source 2: Web, Official Brand FAQs, and U.S. Halal Directories
 // ---------------------------------------------------------------------------
 
-export function classifyWebResult(url, brand) {
+export function classifyWebResult(url, brand, titleHint = '') {
   let host = '';
   let path = '';
   try {
@@ -615,7 +615,18 @@ export function classifyWebResult(url, brand) {
     return { platform: 'web', source: 'Web' };
   }
 
-  const root = registrableDomain(host);
+  let root = registrableDomain(host);
+  // Google Search Grounding often returns vertexaisearch.cloud.google.com redirect URLs
+  // while putting the actual site domain (e.g. "cabotcreamery.com") in chunk.web.title.
+  if (
+    root === 'google.com' &&
+    path.includes('grounding-api-redirect') &&
+    titleHint &&
+    /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(titleHint.trim())
+  ) {
+    root = registrableDomain(titleHint.trim());
+  }
+
   if (root === 'reddit.com') {
     const m = path.match(/^\/r\/([^/]+)/i);
     return { platform: 'reddit', source: m ? `r/${m[1]}` : 'Reddit' };
@@ -821,6 +832,97 @@ async function enrichTopWebItems(items, brand, ingredients, fetchImpl = fetch) {
   );
 }
 
+async function geminiGroundedWebSearch(brand, shortProduct, ingredients, env, fetchImpl = fetch) {
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey) return [];
+  const model = (env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const ingList = ingredients.length
+    ? ingredients.slice(0, 5).join(', ')
+    : 'enzymes, rennet, gelatin, whey, mono- and diglycerides, natural flavors';
+  const prompt = [
+    `Search the web for U.S. grocery ingredient sourcing information about "${brand} ${shortProduct}".`,
+    `Focus specifically on: ${ingList}, and whether the U.S. version is halal, vegetarian, uses microbial/plant vs. animal-derived ingredients, or has official brand FAQ statements, Muslim Consumer Group / IFANCA / HFSAA / ISA Halal / VRG listings, or Reddit discussions.`,
+    `Give a concise 3-5 sentence factual summary citing only what is supported by the search results. If sources conflict or vary by supplier/facility, say so explicitly. Never guess.`,
+  ].join(' ');
+
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 450,
+        },
+      }),
+    },
+    8000,
+    fetchImpl
+  );
+
+  if (!res.ok) return [];
+  const data = await res.json();
+  const candidate = data?.candidates?.[0];
+  if (!candidate) return [];
+
+  const summaryText = (candidate?.content?.parts || [])
+    .map((p) => p?.text || '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const meta = candidate?.groundingMetadata || {};
+  const chunks = Array.isArray(meta.groundingChunks) ? meta.groundingChunks : [];
+  const supports = Array.isArray(meta.groundingSupports) ? meta.groundingSupports : [];
+
+  // Map each chunk index to the grounded sentence(s) that cite it
+  const chunkExcerpts = new Map();
+  for (const sup of supports) {
+    const segText = String(sup?.segment?.text || '').trim();
+    const indices = Array.isArray(sup?.groundingChunkIndices) ? sup.groundingChunkIndices : [];
+    if (!segText) continue;
+    for (const idx of indices) {
+      const prev = chunkExcerpts.get(idx) || [];
+      if (prev.length < 2 && !prev.includes(segText)) {
+        prev.push(segText);
+        chunkExcerpts.set(idx, prev);
+      }
+    }
+  }
+
+  const results = [];
+  const seen = new Set();
+  for (let i = 0; i < chunks.length; i++) {
+    const web = chunks[i]?.web;
+    const uri = String(web?.uri || '').trim();
+    const title = String(web?.title || '').trim();
+    if (!uri || !isSafePublicUrl(uri) || seen.has(uri)) continue;
+    seen.add(uri);
+    const matchedSegments = chunkExcerpts.get(i) || [];
+    const snippet = matchedSegments.length > 0 ? matchedSegments.join(' ') : summaryText;
+    results.push({
+      url: uri,
+      title: title || 'Google Search source',
+      snippet: snippet.slice(0, 520),
+      posted_at: null,
+      fromGemini: true,
+    });
+    if (results.length >= 8) break;
+  }
+
+  return results;
+}
+
 async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fetchImpl = fetch) {
   const ingHint = ingredients.length
     ? ingredients.slice(0, 3).join(' OR ')
@@ -831,15 +933,31 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
   let rawResults = [];
   let engine = 'ddg';
 
+  if (env.GEMINI_API_KEY) {
+    engine = 'gemini_google_search';
+    try {
+      const geminiRows = await geminiGroundedWebSearch(
+        brand,
+        shortProduct,
+        ingredients,
+        env,
+        fetchImpl
+      );
+      rawResults.push(...geminiRows);
+    } catch {
+      // fall through to Brave / DDG / Bing
+    }
+  }
+
   if (env.BRAVE_API_KEY) {
-    engine = 'brave';
+    engine = engine === 'gemini_google_search' ? 'gemini_and_brave' : 'brave';
     const [gen, dir] = await Promise.allSettled([
       braveWebSearch(generalQuery, env.BRAVE_API_KEY, 6, fetchImpl),
       braveWebSearch(directoryQuery, env.BRAVE_API_KEY, 5, fetchImpl),
     ]);
     if (gen.status === 'fulfilled') rawResults.push(...gen.value);
     if (dir.status === 'fulfilled') rawResults.push(...dir.value);
-  } else {
+  } else if (rawResults.length === 0) {
     const [gen, dir] = await Promise.allSettled([
       ddgWebSearch(generalQuery, fetchImpl),
       ddgWebSearch(directoryQuery, fetchImpl),
@@ -867,7 +985,7 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
   for (const r of rawResults) {
     if (!r.url || seen.has(r.url)) continue;
     seen.add(r.url);
-    const { platform, source } = classifyWebResult(r.url, brand);
+    const { platform, source } = classifyWebResult(r.url, brand, r.title || '');
     items.push({
       platform,
       source,
@@ -883,10 +1001,21 @@ async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fet
   const priority = { brand_faq: 0, halal_directory: 1, web: 2, reddit: 3 };
   items.sort((a, b) => (priority[a.platform] ?? 9) - (priority[b.platform] ?? 9));
 
-  await enrichTopWebItems(items, brand, ingredients, fetchImpl);
+  // Only fetch HTML excerpts for direct non-redirect URLs
+  const enrichable = items.filter((it) => !it.url.includes('grounding-api-redirect'));
+  await enrichTopWebItems(enrichable, brand, ingredients, fetchImpl);
+
+  const sourceTag =
+    engine === 'gemini_google_search'
+      ? 'gemini_google_search'
+      : engine === 'gemini_and_brave'
+      ? 'gemini_and_brave_search'
+      : engine === 'brave'
+      ? 'brave_web_and_halal_sites'
+      : 'web_and_halal_sites';
 
   return {
-    source: engine === 'brave' ? 'brave_web_and_halal_sites' : 'web_and_halal_sites',
+    source: sourceTag,
     status: items.length ? 'ok' : 'empty',
     items: items.slice(0, 10),
   };
@@ -1029,12 +1158,102 @@ function findSameDomainContactLink(htmlText, baseUrl) {
   return best;
 }
 
+async function geminiGroundedBrandContact(brand, env, fetchImpl = fetch) {
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  const model = (env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const prompt = [
+    `Find the official U.S. consumer care / customer support contact for the grocery brand "${brand}".`,
+    `Return ONLY a compact JSON object with keys: "contact_url" (official contact/support URL or null), "email" (published support email on the brand's own domain, or null — NEVER guess or fabricate an email), "phone" (U.S. toll-free phone or null).`,
+  ].join(' ');
+
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: {
+          temperature: 0.0,
+          maxOutputTokens: 250,
+        },
+      }),
+    },
+    7500,
+    fetchImpl
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const text = (data?.candidates?.[0]?.content?.parts || [])
+    .map((p) => p?.text || '')
+    .join('\n')
+    .trim();
+  if (!text) return null;
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    return null;
+  }
+
+  let contactUrl =
+    typeof parsed.contact_url === 'string' && isSafePublicUrl(parsed.contact_url.trim())
+      ? parsed.contact_url.trim()
+      : null;
+  if (contactUrl) {
+    const root = registrableDomain(new URL(contactUrl).hostname);
+    if (AGGREGATOR_HOSTS.has(root)) contactUrl = null;
+  }
+
+  const expectedDomain = contactUrl ? registrableDomain(new URL(contactUrl).hostname) : null;
+  const rawEmail = typeof parsed.email === 'string' ? parsed.email.trim().toLowerCase() : null;
+  const email = rawEmail && isValidSupportEmail(rawEmail, expectedDomain) ? rawEmail : null;
+  const phone = typeof parsed.phone === 'string' && parsed.phone.trim() ? parsed.phone.trim() : null;
+
+  if (!contactUrl && !email) return null;
+  return { contact_url: contactUrl, email, phone };
+}
+
 async function handleBrandContact(brand, env, fetchImpl = fetch) {
   const cleaned = brand.trim();
   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(
     `"${cleaned}" consumer care OR customer support contact email`
   )}`;
   const query = `"${cleaned}" official "contact us" consumer care OR customer support`;
+
+  if (env.GEMINI_API_KEY) {
+    try {
+      const grounded = await geminiGroundedBrandContact(cleaned, env, fetchImpl);
+      if (grounded && (grounded.contact_url || grounded.email)) {
+        return {
+          brand: cleaned,
+          matched_query: cleaned,
+          source: 'gemini_google_search',
+          verified: false,
+          contact_type: grounded.email ? 'email' : 'web_form',
+          email: grounded.email,
+          contact_url: grounded.contact_url,
+          phone: grounded.phone,
+          search_url: searchUrl,
+          note: "Discovered via Google Search grounding on the brand's official site. Please verify before sending.",
+        };
+      }
+    } catch {
+      // fall through to Brave / DDG / Bing
+    }
+  }
 
   let results = [];
   try {
@@ -1151,9 +1370,10 @@ export async function handleRequest(request, env = {}, ctx = null, fetchImpl = f
         status: 'ok',
         service: 'halallens-research-worker',
         capabilities: {
+          gemini_google_search: Boolean(env.GEMINI_API_KEY),
+          brave_search: Boolean(env.BRAVE_API_KEY),
           reddit_oauth: Boolean(env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET),
           reddit_archive: true,
-          brave_search: Boolean(env.BRAVE_API_KEY),
           web_fallback: true,
           halal_directories: Object.values(HALAL_DIRECTORY_HOSTS),
           brand_contact_lookup: true,

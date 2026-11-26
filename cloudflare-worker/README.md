@@ -25,8 +25,9 @@ This zero-dependency Cloudflare Worker runs on Cloudflare's **\$0/month free tie
 
 3. **Optional Free Upgrades (Recommended for Best Web Coverage)**
    In Cloudflare Dashboard → your Worker → **Settings → Variables and Secrets → Add secret**:
-   - `BRAVE_API_KEY`: Free tier (2,000 web searches/month) at [brave.com/search/api](https://brave.com/search/api/). Dramatically improves official brand FAQ & U.S. halal directory discovery compared to the zero-key DuckDuckGo fallback.
-   - `REDDIT_CLIENT_ID` & `REDDIT_CLIENT_SECRET`: Optional free Reddit "script" app at [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (without these, the Worker automatically uses the free Arctic Shift public Reddit archive).
+   - `GEMINI_API_KEY` *(Recommended — Google Search Grounding)*: Free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Uses Google's live web index to search official brand FAQs, U.S. halal directories, Reddit, and brand support pages in one call. (Optional `GEMINI_MODEL` variable defaults to `gemini-2.5-flash`.)
+   - `BRAVE_API_KEY`: Alternative free tier (2,000 web searches/month) at [brave.com/search/api](https://brave.com/search/api/).
+   - `REDDIT_CLIENT_ID` & `REDDIT_CLIENT_SECRET`: Optional free Reddit "script" app at [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (without these, the Worker automatically uses public Reddit archives).
 
 ---
 
