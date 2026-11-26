@@ -21,9 +21,12 @@ import { addMonths, buildOutreachDraft, parseForumPost, todayISO } from '../engi
 import { FORUM_SAMPLES } from '../engine/seeds';
 import {
   buildBrandSearchUrl,
+  getEffectiveProxyUrl,
   isPlaceholderEmail,
   lookupBrandContactFromApi,
+  normalizeProxyUrl,
   resolveBrandContact,
+  testProxyConnection,
 } from '../engine/store';
 import type {
   AppMode,
@@ -169,6 +172,7 @@ export function DraftEmailSheet({
   allProducts,
   brandContacts,
   appMode,
+  proxyUrl,
   mode,
   sigId,
   onSaveBrandContact,
@@ -180,6 +184,7 @@ export function DraftEmailSheet({
   allProducts: ProductRecord[];
   brandContacts: Record<string, SavedBrandContact>;
   appMode: AppMode;
+  proxyUrl: string;
   mode: 'full' | 'quick';
   sigId?: string;
   onSaveBrandContact: (
@@ -223,6 +228,7 @@ export function DraftEmailSheet({
   const hasContactUrl = Boolean(normalizedUrl);
   const isWebFormOnly = !hasEmail && hasContactUrl;
   const isUnknownBrand = !hasEmail && !hasContactUrl;
+  const hasRemoteLookup = Boolean(getEffectiveProxyUrl(proxyUrl)) || appMode === 'api';
 
   const displayBrand =
     resolved.matchedParent &&
@@ -269,10 +275,10 @@ export function DraftEmailSheet({
   };
 
   const handleFindOfficialContact = async () => {
-    if (appMode === 'api') {
+    if (hasRemoteLookup) {
       setLookingUp(true);
       setLookupNote(null);
-      const res = await lookupBrandContactFromApi(ev.p.brand);
+      const res = await lookupBrandContactFromApi(ev.p.brand, { proxyUrl, appMode });
       setLookingUp(false);
       if (res && (res.email || res.contact_url)) {
         const nextEmail = res.email || '';
@@ -401,7 +407,7 @@ export function DraftEmailSheet({
                 <Search size={14} />
                 {lookingUp ? 'Searching…' : 'Find official support contact'}
               </button>
-              {appMode === 'api' && (
+              {hasRemoteLookup && (
                 <a
                   className="btn btn-ghost btn-sm"
                   href={searchUrl}
@@ -1058,6 +1064,7 @@ export function AddPolicySheet({
 export function SettingsSheet({
   strict,
   usdaApiKey,
+  proxyUrl,
   showExamples,
   appMode,
   onSave,
@@ -1069,9 +1076,15 @@ export function SettingsSheet({
 }: {
   strict: StrictnessSettings;
   usdaApiKey: string;
+  proxyUrl: string;
   showExamples: boolean;
   appMode: AppMode;
-  onSave: (next: { strict: StrictnessSettings; usdaApiKey: string; showExamples: boolean }) => void;
+  onSave: (next: {
+    strict: StrictnessSettings;
+    usdaApiKey: string;
+    proxyUrl: string;
+    showExamples: boolean;
+  }) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
   onClearExamples: () => void;
@@ -1080,6 +1093,9 @@ export function SettingsSheet({
 }) {
   const [localStrict, setLocalStrict] = useState<StrictnessSettings>(strict);
   const [localUsdaKey, setLocalUsdaKey] = useState(usdaApiKey);
+  const [localProxyUrl, setLocalProxyUrl] = useState(proxyUrl);
+  const [testingProxy, setTestingProxy] = useState(false);
+  const [proxyStatus, setProxyStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [localShowExamples, setLocalShowExamples] = useState(showExamples);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -1112,6 +1128,7 @@ export function SettingsSheet({
               onSave({
                 strict: localStrict,
                 usdaApiKey: localUsdaKey.trim(),
+                proxyUrl: normalizeProxyUrl(localProxyUrl),
                 showExamples: localShowExamples,
               });
               onClose();
@@ -1207,6 +1224,59 @@ export function SettingsSheet({
       <div className="divider" />
 
       <div className="field">
+        <label className="field-l" htmlFor="s-proxy">
+          Multi-site live scan proxy URL (Cloudflare Worker, free)
+        </label>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            id="s-proxy"
+            className="input mono"
+            style={{ flex: 1 }}
+            placeholder="https://halallens-scanner.yourname.workers.dev"
+            value={localProxyUrl}
+            onChange={(e) => {
+              setLocalProxyUrl(e.target.value);
+              setProxyStatus(null);
+            }}
+          />
+          <button
+            className="btn btn-outline btn-sm"
+            type="button"
+            disabled={testingProxy || !localProxyUrl.trim()}
+            onClick={() => {
+              setTestingProxy(true);
+              setProxyStatus(null);
+              void testProxyConnection(localProxyUrl).then((res) => {
+                setTestingProxy(false);
+                setProxyStatus(res);
+              });
+            }}
+          >
+            {testingProxy ? 'Testing…' : 'Test'}
+          </button>
+        </div>
+        {proxyStatus && (
+          <div
+            className={`notice ${proxyStatus.ok ? 'tone-ok' : 'tone-haram'} mt8`}
+            style={{ padding: '8px 12px', fontSize: 13 }}
+          >
+            <div>{proxyStatus.message}</div>
+          </div>
+        )}
+        <div className="field-h">
+          Unlocks live scanning of Reddit, official brand FAQs, Muslim Consumer Group, IFANCA &amp; brand contact lookup without browser CORS blocks.{' '}
+          <a
+            href="https://github.com/omermd007/halalLens/tree/main/cloudflare-worker"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Free 3-step Cloudflare setup guide
+          </a>
+          .
+        </div>
+      </div>
+
+      <div className="field mt12">
         <label className="field-l" htmlFor="s-usda">
           Personal USDA FoodData Central API key (optional)
         </label>

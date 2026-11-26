@@ -386,6 +386,10 @@ export function ProductDetailView({
 
                     <div className="sig-tags">
                       <span className="tag">{TIER_LABEL[s.tier] || 'Community'}</span>
+                      {s.platform === 'halal_directory' && (
+                        <span className="tag">Halal directory</span>
+                      )}
+                      {s.platform === 'web' && <span className="tag">Web guide</span>}
                       <span className="tag">{freshnessLabel(s.posted_at)}</span>
                       {s.region === 'us' && <span className="tag">U.S. product</span>}
                       {s.ingredients.map((ing) => (
@@ -416,7 +420,7 @@ export function ProductDetailView({
               })
             ) : (
               <div className="empty small">
-                No saved forum posts for this item yet. Tap <b>Live scan</b> or <b>Reddit</b> above, or paste a post you found.
+                No saved web or forum leads for this item yet. Tap <b>Live scan</b> to check Reddit, brand FAQs &amp; U.S. halal sites, or paste a post you found.
               </div>
             )}
           </section>

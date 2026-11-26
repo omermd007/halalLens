@@ -32,6 +32,7 @@ import {
 } from './engine/evaluator';
 import { createSeedProducts, DEFAULT_STRICT, SEED_POLICIES } from './engine/seeds';
 import {
+  DEFAULT_PROXY_URL,
   detectBackendMode,
   exportBackupJson,
   liveRedditForumScan,
@@ -403,9 +404,13 @@ export default function App() {
   );
 
   const handleLiveForumScan = useCallback(
-    async (product: ProductRecord) => {
+    async (product: ProductRecord, flaggedIngredients: string[]) => {
       setScanningForum(true);
-      const res = await liveRedditForumScan(product);
+      const res = await liveRedditForumScan(product, {
+        flaggedIngredients,
+        proxyUrl: persisted.proxyUrl,
+        appMode,
+      });
       setScanningForum(false);
       if (res.added.length) {
         setPersisted((prev) => ({
@@ -417,7 +422,7 @@ export default function App() {
       }
       showToast(res.message);
     },
-    [showToast]
+    [persisted.proxyUrl, appMode, showToast]
   );
 
   const handleSaveForumPost = useCallback(
@@ -608,7 +613,14 @@ export default function App() {
               setView('label');
             }}
             onSimulateChange={() => handleSimulateChange(activeEval.p.id)}
-            onLiveForumScan={() => void handleLiveForumScan(activeEval.p)}
+            onLiveForumScan={() =>
+              void handleLiveForumScan(
+                activeEval.p,
+                (activeEval.unresolvedFlags.length ? activeEval.unresolvedFlags : activeEval.flags).map(
+                  (f) => f.rule.name
+                )
+              )
+            }
             onOpenPasteForum={() => setSheet({ kind: 'paste-forum', productId: activeEval.p.id })}
             scanningForum={scanningForum}
           />
@@ -732,6 +744,7 @@ export default function App() {
                 allProducts={persisted.products}
                 brandContacts={persisted.brandContacts}
                 appMode={appMode}
+                proxyUrl={persisted.proxyUrl}
                 mode={sheet.mode}
                 sigId={sheet.sigId}
                 onSaveBrandContact={handleSaveBrandContact}
@@ -789,6 +802,7 @@ export default function App() {
           <SettingsSheet
             strict={persisted.strict}
             usdaApiKey={persisted.usdaApiKey}
+            proxyUrl={persisted.proxyUrl}
             showExamples={persisted.showExamples}
             appMode={appMode}
             onSave={(next) => {
@@ -796,6 +810,7 @@ export default function App() {
                 ...prev,
                 strict: next.strict,
                 usdaApiKey: next.usdaApiKey,
+                proxyUrl: next.proxyUrl,
                 showExamples: next.showExamples,
               }));
               showToast('Settings saved.');
@@ -835,6 +850,7 @@ export default function App() {
                 strict: { ...DEFAULT_STRICT },
                 history: [],
                 usdaApiKey: '',
+                proxyUrl: DEFAULT_PROXY_URL,
                 showExamples: true,
               });
               setSheet(null);

@@ -200,23 +200,85 @@ export function buildBrandSearchUrl(brand: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }
 
-export async function lookupBrandContactFromApi(
-  brand: string
-): Promise<BrandContactLookupResult | null> {
+export const DEFAULT_PROXY_URL = String(import.meta.env.VITE_PROXY_URL || '')
+  .trim()
+  .replace(/\/+$/, '');
+
+export function normalizeProxyUrl(raw: string | null | undefined): string {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  const withProto = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return withProto.replace(/\/+$/, '');
+}
+
+export function getEffectiveProxyUrl(savedProxyUrl?: string): string {
+  return normalizeProxyUrl(savedProxyUrl) || DEFAULT_PROXY_URL;
+}
+
+export async function testProxyConnection(rawUrl: string): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  const base = normalizeProxyUrl(rawUrl);
+  if (!base) {
+    return { ok: false, message: 'Enter your Cloudflare Worker URL first.' };
+  }
   try {
-    const passcode = getSavedPasscode();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(`${base}/health`, {
+      signal: ctrl.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      return { ok: false, message: `Worker responded with HTTP ${res.status}.` };
+    }
+    const data = (await res.json()) as {
+      status?: string;
+      capabilities?: { brave_search?: boolean; reddit_oauth?: boolean };
+    };
+    if (data?.status !== 'ok') {
+      return { ok: false, message: 'Unexpected response from worker /health endpoint.' };
+    }
+    const features = [
+      data.capabilities?.reddit_oauth ? 'Reddit OAuth' : 'Reddit archive',
+      data.capabilities?.brave_search ? 'Brave Web Search' : 'Web & Halal directories',
+      'FAQ extraction',
+    ];
+    return { ok: true, message: `Connected · ${features.join(' + ')} ready.` };
+  } catch {
+    return {
+      ok: false,
+      message: 'Could not reach that Worker URL. Check the URL and ALLOWED_ORIGINS.',
+    };
+  }
+}
+
+export async function lookupBrandContactFromApi(
+  brand: string,
+  options?: { proxyUrl?: string; appMode?: AppMode }
+): Promise<BrandContactLookupResult | null> {
+  const effectiveProxy = getEffectiveProxyUrl(options?.proxyUrl);
+  const endpoint = effectiveProxy
+    ? `${effectiveProxy}/brand-contact?brand=${encodeURIComponent(brand.trim())}`
+    : options?.appMode === 'api'
+      ? `/api/brands/lookup-contact?brand=${encodeURIComponent(brand.trim())}`
+      : '';
+
+  if (!endpoint) return null;
+
+  try {
+    const passcode = effectiveProxy ? '' : getSavedPasscode();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(
-      `/api/brands/lookup-contact?brand=${encodeURIComponent(brand.trim())}`,
-      {
-        signal: ctrl.signal,
-        headers: {
-          Accept: 'application/json',
-          ...(passcode ? { 'X-Passcode': passcode } : {}),
-        },
-      }
-    );
+    const res = await fetch(endpoint, {
+      signal: ctrl.signal,
+      headers: {
+        Accept: 'application/json',
+        ...(passcode ? { 'X-Passcode': passcode } : {}),
+      },
+    });
     clearTimeout(timer);
     if (!res.ok) return null;
     return (await res.json()) as BrandContactLookupResult;
@@ -275,6 +337,7 @@ export interface PersistedState {
   strict: StrictnessSettings;
   history: HistoryItem[];
   usdaApiKey: string;
+  proxyUrl: string;
   showExamples: boolean;
 }
 
@@ -286,6 +349,7 @@ export function loadPersistedState(): PersistedState {
     strict: { ...DEFAULT_STRICT },
     history: [],
     usdaApiKey: '',
+    proxyUrl: DEFAULT_PROXY_URL,
     showExamples: true,
   };
   try {
@@ -301,6 +365,7 @@ export function loadPersistedState(): PersistedState {
       strict: d.strict ? { ...DEFAULT_STRICT, ...d.strict } : defaults.strict,
       history: Array.isArray(d.history) ? d.history : [],
       usdaApiKey: typeof d.usdaApiKey === 'string' ? d.usdaApiKey : '',
+      proxyUrl: typeof d.proxyUrl === 'string' ? normalizeProxyUrl(d.proxyUrl) : DEFAULT_PROXY_URL,
       showExamples: typeof d.showExamples === 'boolean' ? d.showExamples : true,
     };
   } catch {
@@ -605,11 +670,155 @@ export async function runUpcWaterfall(params: {
   return { product: null, imported: false, steps };
 }
 
-export async function liveRedditForumScan(product: ProductRecord): Promise<{
+interface WorkerScanItem {
+  platform?: string;
+  source?: string;
+  url?: string;
+  title?: string;
+  author?: string | null;
+  posted_at?: string | null;
+  excerpt?: string;
+}
+
+export async function liveRedditForumScan(
+  product: ProductRecord,
+  options?: {
+    flaggedIngredients?: string[];
+    proxyUrl?: string;
+    appMode?: AppMode;
+  }
+): Promise<{
   ok: boolean;
   added: ForumSignalItem[];
   message: string;
 }> {
+  const effectiveProxy = getEffectiveProxyUrl(options?.proxyUrl);
+
+  // 1. Cloudflare Worker multi-source scan (Reddit + Brand FAQs + U.S. Halal directories + Web)
+  if (effectiveProxy) {
+    try {
+      const qs = new URLSearchParams({
+        brand: product.brand,
+        product: product.name,
+      });
+      if (options?.flaggedIngredients?.length) {
+        qs.set('ingredients', options.flaggedIngredients.slice(0, 4).join(','));
+      }
+      const data = (await fetchJSON(`${effectiveProxy}/scan?${qs.toString()}`, 12000)) as {
+        ok?: boolean;
+        items?: WorkerScanItem[];
+      } | null;
+
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const added: ForumSignalItem[] = [];
+      const existingUrls = new Set(
+        product.signals.map((s) => (s.url || '').toLowerCase()).filter(Boolean)
+      );
+
+      for (const item of items) {
+        const url = String(item.url || '').trim();
+        if (url && existingUrls.has(url.toLowerCase())) continue;
+        if (url) existingUrls.add(url.toLowerCase());
+
+        const sig = parseForumPost(
+          String(item.title || ''),
+          String(item.excerpt || ''),
+          String(item.source || 'Web'),
+          url
+        );
+        if (item.platform) sig.platform = item.platform;
+        if (item.platform === 'brand_faq') sig.tier = 'official_brand_faq';
+        if (item.author) sig.author = String(item.author);
+        if (item.posted_at && /^\d{4}-\d{2}-\d{2}/.test(item.posted_at)) {
+          sig.posted_at = item.posted_at.slice(0, 10);
+        }
+        added.push(sig);
+      }
+
+      if (!added.length) {
+        return {
+          ok: true,
+          added: [],
+          message: 'Scanned Reddit, brand FAQs & halal sites — no new matching results found.',
+        };
+      }
+
+      const buckets = new Set<string>();
+      for (const s of added) {
+        if (s.platform === 'brand_faq') buckets.add('Brand FAQ');
+        else if (s.platform === 'halal_directory') buckets.add('Halal directories');
+        else if (s.platform === 'reddit') buckets.add('Reddit');
+        else buckets.add('Web');
+      }
+      const sourceSummary = Array.from(buckets).join(', ');
+      return {
+        ok: true,
+        added,
+        message: `Added ${added.length} result${added.length === 1 ? '' : 's'} from ${sourceSummary}.`,
+      };
+    } catch {
+      return {
+        ok: false,
+        added: [],
+        message:
+          'Could not reach your live scan proxy URL. Check Settings → Multi-site live scan proxy URL.',
+      };
+    }
+  }
+
+  // 2. FastAPI backend server-side scanner (when hosted full-stack)
+  if (options?.appMode === 'api') {
+    try {
+      const passcode = getSavedPasscode();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const res = await fetch(`/api/forums/scan/${encodeURIComponent(product.id)}`, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          ...(passcode ? { 'X-Passcode': passcode } : {}),
+        },
+        body: JSON.stringify({ include_live_reddit: true }),
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = (await res.json()) as {
+          signals?: Array<Record<string, unknown>>;
+        };
+        const existingUrls = new Set(
+          product.signals.map((s) => (s.url || '').toLowerCase()).filter(Boolean)
+        );
+        const added: ForumSignalItem[] = [];
+        for (const s of data.signals || []) {
+          const url = String(s.url || '').trim();
+          if (url && existingUrls.has(url.toLowerCase())) continue;
+          const sig = parseForumPost(
+            String(s.title || ''),
+            String(s.raw_excerpt || ''),
+            String(s.source_name || 'Forum'),
+            url
+          );
+          if (s.source_platform) sig.platform = String(s.source_platform);
+          if (s.author) sig.author = String(s.author);
+          if (typeof s.posted_at === 'string' && s.posted_at) sig.posted_at = s.posted_at.slice(0, 10);
+          added.push(sig);
+        }
+        return {
+          ok: true,
+          added,
+          message: added.length
+            ? `Added ${added.length} community/web result${added.length === 1 ? '' : 's'}.`
+            : 'No new matching posts found.',
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 3. Direct browser fallback (works only if browser/network permits reddit.com CORS)
   const q = encodeURIComponent(`${product.brand} ${product.name.split(' ').slice(0, 3).join(' ')} halal`);
   try {
     const data = (await fetchJSON(
@@ -646,7 +855,8 @@ export async function liveRedditForumScan(product: ProductRecord): Promise<{
     return {
       ok: false,
       added: [],
-      message: 'Live Reddit scan was blocked by the browser. Use the Reddit / Web links and "Paste a post".',
+      message:
+        'Live scan blocked by browser (CORS). Add your free Cloudflare Worker URL in Settings for live Reddit + Web scanning, or use Reddit / Web + "Paste a post".',
     };
   }
 }
@@ -681,6 +891,7 @@ export async function parseBackupFile(file: File): Promise<PersistedState> {
     strict: d.strict ? { ...DEFAULT_STRICT, ...d.strict } : { ...DEFAULT_STRICT },
     history: Array.isArray(d.history) ? d.history : [],
     usdaApiKey: typeof d.usdaApiKey === 'string' ? d.usdaApiKey : '',
+    proxyUrl: typeof d.proxyUrl === 'string' ? normalizeProxyUrl(d.proxyUrl) : DEFAULT_PROXY_URL,
     showExamples: typeof d.showExamples === 'boolean' ? d.showExamples : true,
   };
 }

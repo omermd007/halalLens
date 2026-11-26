@@ -1,0 +1,1053 @@
+/**
+ * HalalLens Multi-Source Research & Brand Contact Worker (Cloudflare Workers — Free Tier)
+ *
+ * Endpoints:
+ *   GET /health
+ *   GET /scan?brand=...&product=...&ingredients=...
+ *   GET /brand-contact?brand=...
+ *
+ * Optional Worker Secrets (all optional — works zero-key out of the box):
+ *   BRAVE_API_KEY         - Free tier (2,000 queries/mo) at https://brave.com/search/api/
+ *   REDDIT_CLIENT_ID      - Free Reddit "script" app at https://www.reddit.com/prefs/apps
+ *   REDDIT_CLIENT_SECRET  - Paired with REDDIT_CLIENT_ID
+ *   ALLOWED_ORIGINS       - Comma-separated extra allowed origins (default includes https://omermd007.github.io)
+ */
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://omermd007.github.io',
+];
+
+const REDDIT_SUBREDDITS = ['halal', 'MuslimLounge', 'Costco', 'traderjoes', 'vegetarian'];
+
+const HALAL_DIRECTORY_HOSTS = {
+  'muslimconsumergroup.com': 'Muslim Consumer Group',
+  'ifanca.org': 'IFANCA',
+  'hfsaa.org': 'HFSAA',
+  'isahalal.com': 'ISA Halal',
+  'vrg.org': 'Vegetarian Resource Group',
+  'isithalal.org': 'IsItHalal',
+  'halalguide.org': 'Halal Guide',
+  'scanhalal.org': 'ScanHalal',
+};
+
+const AGGREGATOR_HOSTS = new Set([
+  'pissedconsumer.com',
+  'gethuman.com',
+  'bbb.org',
+  'wikipedia.org',
+  'reddit.com',
+  'facebook.com',
+  'instagram.com',
+  'twitter.com',
+  'x.com',
+  'linkedin.com',
+  'yelp.com',
+  'zoominfo.com',
+  'amazon.com',
+  'walmart.com',
+  'target.com',
+  'instacart.com',
+  'youtube.com',
+  'tiktok.com',
+  'pinterest.com',
+  'dnb.com',
+  'bloomberg.com',
+  'crunchbase.com',
+  'glassdoor.com',
+  'indeed.com',
+  'corporateoffice.com',
+  'donotpay.com',
+  'duckduckgo.com',
+  'google.com',
+  'example.com',
+  'example.org',
+  'example.net',
+]);
+
+const BLOCKED_EMAIL_DOMAINS = new Set([
+  'example.com',
+  'example.org',
+  'example.net',
+  'test.com',
+  'invalid',
+  'localhost',
+  'wixpress.com',
+  'sentry.io',
+  'squarespace.com',
+  'shopify.com',
+  'cloudflare.com',
+  'w3.org',
+  'schema.org',
+  'googleapis.com',
+  'gravatar.com',
+  'facebook.com',
+  'twitter.com',
+  'instagram.com',
+  'youtube.com',
+  'pissedconsumer.com',
+  'gethuman.com',
+  'bbb.org',
+]);
+
+const BLOCKED_LOCAL_PARTS = new Set([
+  'noreply',
+  'no-reply',
+  'no_reply',
+  'donotreply',
+  'do-not-reply',
+  'do_not_reply',
+  'mailer-daemon',
+  'postmaster',
+  'webmaster',
+  'hostmaster',
+  'abuse',
+  'security',
+  'privacy',
+  'usprivacy',
+  'gdpr',
+  'dpo',
+  'legal',
+  'dmca',
+  'copyright',
+  'copyrights',
+  'trademark',
+  'press',
+  'media',
+  'pr',
+  'news',
+  'newsroom',
+  'ir',
+  'investor',
+  'investors',
+  'investorrelations',
+  'careers',
+  'jobs',
+  'hr',
+  'askhr',
+  'recruiting',
+  'talent',
+  'unsubscribe',
+  'bounce',
+  'notifications',
+  'alerts',
+  'billing',
+  'sales',
+  'wholesale',
+  'affiliate',
+  'affiliates',
+  'donations',
+  'sponsorship',
+  'boardofdirectors',
+]);
+
+const PREFERRED_LOCAL_HINTS = [
+  'customerservice',
+  'customercare',
+  'consumercare',
+  'consumerrelations',
+  'crelations',
+  'support',
+  'care',
+  'help',
+  'ask',
+  'contact',
+  'contactus',
+  'info',
+  'hello',
+];
+
+const BRAND_STOPWORDS = new Set([
+  'inc',
+  'llc',
+  'co',
+  'corp',
+  'corporation',
+  'company',
+  'foods',
+  'food',
+  'brands',
+  'brand',
+  'usa',
+  'us',
+  'the',
+  'and',
+  'of',
+  'international',
+  'north',
+  'america',
+]);
+
+const INGREDIENT_KEYWORDS = [
+  'halal',
+  'haram',
+  'enzyme',
+  'rennet',
+  'microbial',
+  'vegetarian',
+  'vegan',
+  'gelatin',
+  'porcine',
+  'pork',
+  'beef',
+  'animal',
+  'whey',
+  'culture',
+  'diglyceride',
+  'monoglyceride',
+  'cysteine',
+  'glycerin',
+  'natural flavor',
+  'carmine',
+  'shellac',
+  'vanilla',
+  'alcohol',
+  'ethanol',
+  'kosher',
+];
+
+const USER_AGENT =
+  'HalalLens-Worker/1.0 (+https://github.com/omermd007/halalLens; read-only ingredient research)';
+
+// ---------------------------------------------------------------------------
+// CORS & URL / Email Safety Helpers
+// ---------------------------------------------------------------------------
+
+export function resolveCorsOrigin(requestOrigin, env = {}) {
+  if (!requestOrigin) return DEFAULT_ALLOWED_ORIGINS[0];
+  try {
+    const u = new URL(requestOrigin);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+      return requestOrigin;
+    }
+  } catch {
+    return null;
+  }
+  const extra = String(env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allowed = new Set([...DEFAULT_ALLOWED_ORIGINS, ...extra]);
+  if (allowed.has('*')) return '*';
+  return allowed.has(requestOrigin) ? requestOrigin : null;
+}
+
+function corsHeaders(origin) {
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    Vary: 'Origin',
+  };
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
+  return headers;
+}
+
+function jsonResponse(payload, status = 200, origin = null, extraHeaders = {}) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders(origin), ...extraHeaders },
+  });
+}
+
+export function normalizeBrand(str) {
+  return String(str || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/['’`]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export function registrableDomain(host) {
+  const h = String(host || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\.$/, '')
+    .replace(/^www\./, '');
+  const parts = h.split('.').filter(Boolean);
+  if (parts.length <= 2) return parts.join('.');
+  const last = parts[parts.length - 1];
+  const prev = parts[parts.length - 2];
+  if (['uk', 'au', 'nz', 'ca'].includes(last) && ['co', 'com', 'org', 'net'].includes(prev)) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+
+export function isSafePublicUrl(rawUrl) {
+  let u;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  if (!host || host === 'localhost' || host === '::1' || host === '[::1]') return false;
+  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) {
+    return false;
+  }
+  // Reject IPv4 private/loopback/link-local ranges and bare IPv6 literals
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    const octets = host.split('.').map(Number);
+    const [a, b] = octets;
+    if (
+      a === 10 ||
+      a === 127 ||
+      a === 0 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)
+    ) {
+      return false;
+    }
+  }
+  if (host.includes(':')) return false;
+  return true;
+}
+
+export function isValidSupportEmail(email, expectedDomain = null) {
+  if (!email) return false;
+  const cleaned = String(email).trim().toLowerCase();
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(cleaned)) return false;
+  const [local, domain] = cleaned.split('@');
+  if (BLOCKED_EMAIL_DOMAINS.has(domain)) return false;
+  for (const blocked of BLOCKED_EMAIL_DOMAINS) {
+    if (domain.endsWith(`.${blocked}`)) return false;
+  }
+  const localFlat = local.replace(/[^a-z0-9]/g, '');
+  if (BLOCKED_LOCAL_PARTS.has(local) || BLOCKED_LOCAL_PARTS.has(localFlat)) return false;
+  if (
+    local.startsWith('noreply') ||
+    local.startsWith('no-reply') ||
+    local.startsWith('no_reply') ||
+    local.startsWith('donotreply') ||
+    local.startsWith('do-not-reply')
+  ) {
+    return false;
+  }
+  if (expectedDomain) {
+    const expRoot = registrableDomain(expectedDomain);
+    const emailRoot = registrableDomain(domain);
+    if (expRoot && emailRoot !== expRoot) return false;
+  }
+  return true;
+}
+
+function decodeHtmlEntities(text) {
+  return String(text || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&#x27;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+}
+
+function stripTags(html) {
+  return decodeHtmlEntities(
+    String(html || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000, fetchImpl = fetch) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, {
+      ...options,
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept-Language': 'en-US,en;q=0.9',
+        ...(options.headers || {}),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Source 1: Reddit (OAuth if configured, Arctic Shift public API, Reddit JSON)
+// ---------------------------------------------------------------------------
+
+async function getRedditOAuthToken(env, fetchImpl = fetch) {
+  if (!env.REDDIT_CLIENT_ID || !env.REDDIT_CLIENT_SECRET) return null;
+  try {
+    const auth = btoa(`${env.REDDIT_CLIENT_ID}:${env.REDDIT_CLIENT_SECRET}`);
+    const res = await fetchWithTimeout(
+      'https://www.reddit.com/api/v1/access_token',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'grant_type=client_credentials',
+      },
+      4500,
+      fetchImpl
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
+async function searchReddit(brand, shortProduct, env, fetchImpl = fetch) {
+  const query = `${brand} ${shortProduct} halal`.trim();
+  const items = [];
+
+  // 1a. Official Reddit OAuth API (if user added free script-app credentials)
+  const token = await getRedditOAuthToken(env, fetchImpl);
+  if (token) {
+    try {
+      const url = `https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=8&type=link`;
+      const res = await fetchWithTimeout(
+        url,
+        { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+        5000,
+        fetchImpl
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const children = data?.data?.children || [];
+        for (const ch of children) {
+          const post = ch?.data;
+          if (!post) continue;
+          items.push({
+            platform: 'reddit',
+            source: `r/${post.subreddit || 'reddit'}`,
+            url: `https://www.reddit.com${post.permalink || ''}`,
+            title: String(post.title || '').trim(),
+            author: post.author ? `u/${post.author}` : null,
+            posted_at:
+              typeof post.created_utc === 'number'
+                ? new Date(post.created_utc * 1000).toISOString().slice(0, 10)
+                : null,
+            excerpt: String(post.selftext || post.title || '').trim().slice(0, 520),
+          });
+        }
+        return { source: 'reddit_oauth', status: 'ok', items };
+      }
+    } catch {
+      // fall through to Arctic Shift
+    }
+  }
+
+  // 1b. Arctic Shift public Reddit search API (zero-key, cloud-friendly)
+  try {
+    const subResults = await Promise.allSettled(
+      REDDIT_SUBREDDITS.slice(0, 4).map(async (sub) => {
+        const subQuery = `${brand} ${shortProduct}`.trim();
+        const url = `https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=${encodeURIComponent(
+          sub
+        )}&query=${encodeURIComponent(subQuery)}&limit=4&sort=desc`;
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 4500, fetchImpl);
+        if (!res.ok) return [];
+        const data = await res.json();
+        const rows = Array.isArray(data?.data) ? data.data : [];
+        return rows.map((post) => {
+          const permalink = post.permalink
+            ? String(post.permalink).startsWith('http')
+              ? String(post.permalink)
+              : `https://www.reddit.com${post.permalink}`
+            : `https://www.reddit.com/r/${post.subreddit || sub}/comments/${post.id}/`;
+          return {
+            platform: 'reddit',
+            source: `r/${post.subreddit || sub}`,
+            url: permalink,
+            title: String(post.title || '').trim(),
+            author: post.author ? `u/${post.author}` : null,
+            posted_at:
+              typeof post.created_utc === 'number'
+                ? new Date(post.created_utc * 1000).toISOString().slice(0, 10)
+                : null,
+            excerpt: String(post.selftext || post.title || '').trim().slice(0, 520),
+          };
+        });
+      })
+    );
+
+    for (const r of subResults) {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        items.push(...r.value);
+      }
+    }
+    if (items.length > 0) {
+      return { source: 'reddit_archive', status: 'ok', items };
+    }
+  } catch {
+    // fall through
+  }
+
+  // 1c. Public Reddit search JSON fallback
+  try {
+    const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance&limit=6`;
+    const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 4500, fetchImpl);
+    if (res.ok) {
+      const data = await res.json();
+      const children = data?.data?.children || [];
+      for (const ch of children) {
+        const post = ch?.data;
+        if (!post) continue;
+        items.push({
+          platform: 'reddit',
+          source: `r/${post.subreddit || 'reddit'}`,
+          url: `https://www.reddit.com${post.permalink || ''}`,
+          title: String(post.title || '').trim(),
+          author: post.author ? `u/${post.author}` : null,
+          posted_at:
+            typeof post.created_utc === 'number'
+              ? new Date(post.created_utc * 1000).toISOString().slice(0, 10)
+              : null,
+          excerpt: String(post.selftext || post.title || '').trim().slice(0, 520),
+        });
+      }
+      return { source: 'reddit_public', status: 'ok', items };
+    }
+  } catch {
+    // ignore
+  }
+
+  return { source: 'reddit', status: 'empty', items };
+}
+
+// ---------------------------------------------------------------------------
+// Source 2: Web, Official Brand FAQs, and U.S. Halal Directories
+// ---------------------------------------------------------------------------
+
+export function classifyWebResult(url, brand) {
+  let host = '';
+  let path = '';
+  try {
+    const u = new URL(url);
+    host = u.hostname.toLowerCase();
+    path = u.pathname.toLowerCase();
+  } catch {
+    return { platform: 'web', source: 'Web' };
+  }
+
+  const root = registrableDomain(host);
+  if (root === 'reddit.com') {
+    const m = path.match(/^\/r\/([^/]+)/i);
+    return { platform: 'reddit', source: m ? `r/${m[1]}` : 'Reddit' };
+  }
+
+  if (HALAL_DIRECTORY_HOSTS[root]) {
+    return { platform: 'halal_directory', source: HALAL_DIRECTORY_HOSTS[root] };
+  }
+
+  const brandTokens = normalizeBrand(brand)
+    .split(' ')
+    .filter((t) => t.length >= 3 && !BRAND_STOPWORDS.has(t));
+  const compactBrand = brandTokens.join('');
+  const hostFlat = root.split('.')[0].replace(/[^a-z0-9]/g, '');
+  const isOfficialHost =
+    (compactBrand && (hostFlat.includes(compactBrand) || compactBrand.includes(hostFlat))) ||
+    brandTokens.some((tok) => hostFlat.includes(tok));
+
+  if (isOfficialHost) {
+    return {
+      platform: 'brand_faq',
+      source: `Official ${brand} site (${root})`,
+    };
+  }
+
+  return { platform: 'web', source: root };
+}
+
+export function extractDdgResults(htmlText) {
+  const results = [];
+  const seen = new Set();
+
+  // DuckDuckGo HTML lite result blocks: <a class="result__a" href="...">Title</a> ... <a class="result__snippet"...>Snippet</a>
+  const blockRe =
+    /<a[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>([\s\S]*?)(?=<div[^>]*class=["'][^"']*result\b|$)/gi;
+
+  let m;
+  while ((m = blockRe.exec(htmlText)) !== null) {
+    let rawHref = decodeHtmlEntities(m[1]).trim();
+    const title = stripTags(m[2]);
+    const rest = m[3] || '';
+    const snipMatch = rest.match(/class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div|span)>/i);
+    const snippet = snipMatch ? stripTags(snipMatch[1]) : '';
+
+    let targetUrl = rawHref;
+    if (rawHref.includes('uddg=')) {
+      try {
+        const parsed = new URL(rawHref.startsWith('http') ? rawHref : `https://duckduckgo.com${rawHref}`);
+        const uddg = parsed.searchParams.get('uddg');
+        if (uddg) targetUrl = uddg;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!isSafePublicUrl(targetUrl)) continue;
+    const host = new URL(targetUrl).hostname.toLowerCase();
+    const root = registrableDomain(host);
+    if (AGGREGATOR_HOSTS.has(root) && root !== 'reddit.com') continue;
+    if (seen.has(targetUrl)) continue;
+    seen.add(targetUrl);
+
+    results.push({ url: targetUrl, title, snippet });
+    if (results.length >= 12) break;
+  }
+
+  return results;
+}
+
+async function braveWebSearch(query, apiKey, count = 6, fetchImpl = fetch) {
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(
+    query
+  )}&count=${count}&country=us&search_lang=en`;
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: {
+        Accept: 'application/json',
+        'X-Subscription-Token': apiKey,
+      },
+    },
+    5000,
+    fetchImpl
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  const rows = Array.isArray(data?.web?.results) ? data.web.results : [];
+  return rows
+    .filter((r) => r?.url && isSafePublicUrl(r.url))
+    .map((r) => ({
+      url: String(r.url),
+      title: String(r.title || '').trim(),
+      snippet: stripTags(r.description || ''),
+      posted_at: r.page_age ? String(r.page_age).slice(0, 10) : null,
+    }));
+}
+
+async function ddgWebSearch(query, fetchImpl = fetch) {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const res = await fetchWithTimeout(url, { headers: { Accept: 'text/html' } }, 5000, fetchImpl);
+  if (!res.ok) return [];
+  const html = (await res.text()).slice(0, 300_000);
+  return extractDdgResults(html).map((r) => ({ ...r, posted_at: null }));
+}
+
+export function extractRelevantPageExcerpt(htmlText, brand, ingredients = []) {
+  const cleanText = stripTags(htmlText);
+  if (!cleanText) return '';
+
+  const terms = [
+    ...ingredients.map((i) => i.toLowerCase().trim()).filter(Boolean),
+    ...INGREDIENT_KEYWORDS,
+  ];
+  const sentences = cleanText
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 30 && s.length <= 360);
+
+  const brandLow = normalizeBrand(brand);
+  let best = '';
+  let bestScore = 0;
+
+  for (const s of sentences.slice(0, 220)) {
+    const low = s.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      if (low.includes(term)) score += term.length >= 6 ? 3 : 2;
+    }
+    if (brandLow && normalizeBrand(s).includes(brandLow)) score += 2;
+    if (score > bestScore) {
+      bestScore = score;
+      best = s;
+    }
+  }
+
+  return bestScore >= 2 ? best.slice(0, 500) : '';
+}
+
+async function enrichTopWebItems(items, brand, ingredients, fetchImpl = fetch) {
+  // Enrich up to 2 high-value non-Reddit pages (official brand FAQs or halal directories)
+  const targets = items
+    .filter((it) => it.platform === 'brand_faq' || it.platform === 'halal_directory')
+    .slice(0, 2);
+
+  await Promise.allSettled(
+    targets.map(async (item) => {
+      if (!isSafePublicUrl(item.url)) return;
+      const res = await fetchWithTimeout(item.url, { headers: { Accept: 'text/html' } }, 3800, fetchImpl);
+      if (!res.ok) return;
+      const ctype = (res.headers.get('content-type') || '').toLowerCase();
+      if (ctype && !ctype.includes('text/html') && !ctype.includes('text/plain')) return;
+      const html = (await res.text()).slice(0, 180_000);
+      const richExcerpt = extractRelevantPageExcerpt(html, brand, ingredients);
+      if (richExcerpt && richExcerpt.length > (item.excerpt || '').length) {
+        item.excerpt = richExcerpt;
+      }
+    })
+  );
+}
+
+async function searchWebAndHalalSites(brand, shortProduct, ingredients, env, fetchImpl = fetch) {
+  const ingHint = ingredients.length
+    ? ingredients.slice(0, 3).join(' OR ')
+    : 'enzymes OR rennet OR gelatin OR whey';
+  const generalQuery = `"${brand}" ${shortProduct} (halal OR ${ingHint}) -site:reddit.com`;
+  const directoryQuery = `"${brand}" ${shortProduct} (site:muslimconsumergroup.com OR site:ifanca.org OR site:hfsaa.org OR site:isahalal.com OR site:vrg.org OR site:isithalal.org)`;
+
+  let rawResults = [];
+  let engine = 'ddg';
+
+  if (env.BRAVE_API_KEY) {
+    engine = 'brave';
+    const [gen, dir] = await Promise.allSettled([
+      braveWebSearch(generalQuery, env.BRAVE_API_KEY, 6, fetchImpl),
+      braveWebSearch(directoryQuery, env.BRAVE_API_KEY, 5, fetchImpl),
+    ]);
+    if (gen.status === 'fulfilled') rawResults.push(...gen.value);
+    if (dir.status === 'fulfilled') rawResults.push(...dir.value);
+  } else {
+    const [gen, dir] = await Promise.allSettled([
+      ddgWebSearch(generalQuery, fetchImpl),
+      ddgWebSearch(directoryQuery, fetchImpl),
+    ]);
+    if (gen.status === 'fulfilled') rawResults.push(...gen.value);
+    if (dir.status === 'fulfilled') rawResults.push(...dir.value);
+  }
+
+  const seen = new Set();
+  const items = [];
+  for (const r of rawResults) {
+    if (!r.url || seen.has(r.url)) continue;
+    seen.add(r.url);
+    const { platform, source } = classifyWebResult(r.url, brand);
+    items.push({
+      platform,
+      source,
+      url: r.url,
+      title: r.title || source,
+      author: null,
+      posted_at: r.posted_at || null,
+      excerpt: (r.snippet || '').slice(0, 520),
+    });
+  }
+
+  // Prioritize official brand FAQs and U.S. halal directories first
+  const priority = { brand_faq: 0, halal_directory: 1, web: 2, reddit: 3 };
+  items.sort((a, b) => (priority[a.platform] ?? 9) - (priority[b.platform] ?? 9));
+
+  await enrichTopWebItems(items, brand, ingredients, fetchImpl);
+
+  return {
+    source: engine === 'brave' ? 'brave_web_and_halal_sites' : 'web_and_halal_sites',
+    status: items.length ? 'ok' : 'empty',
+    items: items.slice(0, 10),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint 2: /brand-contact (Official Support Discovery for Unknown Brands)
+// ---------------------------------------------------------------------------
+
+export function pickOfficialContactUrl(brand, candidates) {
+  const tokens = normalizeBrand(brand)
+    .split(' ')
+    .filter((t) => t.length >= 3 && !BRAND_STOPWORDS.has(t));
+  const compactBrand = tokens.join('');
+
+  let bestUrl = null;
+  let bestScore = -1;
+
+  for (const url of candidates) {
+    if (!isSafePublicUrl(url)) continue;
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      continue;
+    }
+    const root = registrableDomain(u.hostname);
+    if (AGGREGATOR_HOSTS.has(root)) continue;
+    const hostFlat = root.split('.')[0].replace(/[^a-z0-9]/g, '');
+    const path = u.pathname.toLowerCase();
+
+    let score = 0;
+    let matched = false;
+    if (compactBrand && (hostFlat.includes(compactBrand) || compactBrand.includes(hostFlat))) {
+      matched = true;
+      score += 50;
+    } else {
+      const hits = tokens.filter((t) => hostFlat.includes(t)).length;
+      if (hits > 0) {
+        matched = true;
+        score += hits * 25;
+      }
+    }
+    if (!matched) continue;
+
+    if (/(contact|support|consumer|customer-care|help)/.test(path)) score += 30;
+    else if (path.includes('faq')) score += 15;
+    if (u.protocol === 'https:') score += 5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestUrl = url;
+    }
+  }
+
+  return bestUrl;
+}
+
+export function extractEmailAndPhoneFromHtml(htmlText, pageUrl) {
+  let expectedDomain = null;
+  try {
+    expectedDomain = registrableDomain(new URL(pageUrl).hostname);
+  } catch {
+    expectedDomain = null;
+  }
+
+  const candidates = [];
+  for (const m of htmlText.matchAll(/mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi)) {
+    candidates.push(m[1].trim());
+  }
+  for (const m of htmlText.matchAll(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g)) {
+    candidates.push(m[0].trim());
+  }
+
+  const seen = new Set();
+  const valid = [];
+  for (const addr of candidates) {
+    const low = addr.toLowerCase();
+    if (seen.has(low)) continue;
+    seen.add(low);
+    if (isValidSupportEmail(low, expectedDomain)) valid.push(low);
+  }
+
+  let email = null;
+  if (valid.length > 0) {
+    const rank = (addr) => {
+      const localFlat = addr.split('@')[0].replace(/[^a-z0-9]/g, '');
+      const idx = PREFERRED_LOCAL_HINTS.findIndex(
+        (h) => localFlat === h || localFlat.includes(h)
+      );
+      return idx >= 0 ? idx : 200;
+    };
+    valid.sort((a, b) => rank(a) - rank(b));
+    email = valid[0];
+  }
+
+  const phoneMatch = htmlText.match(
+    /\b1?[-.\s]?\(?(8(?:00|33|44|55|66|77|88))\)?[-.\s]?(\d{3})[-.\s]?(\d{4})\b/
+  );
+  const phone = phoneMatch
+    ? `1-${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}`
+    : null;
+
+  return { email, phone };
+}
+
+async function handleBrandContact(brand, env, fetchImpl = fetch) {
+  const cleaned = brand.trim();
+  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(
+    `"${cleaned}" consumer care OR customer support contact email`
+  )}`;
+  const query = `"${cleaned}" official "contact us" consumer care OR customer support`;
+
+  let results = [];
+  try {
+    results = env.BRAVE_API_KEY
+      ? await braveWebSearch(query, env.BRAVE_API_KEY, 6, fetchImpl)
+      : await ddgWebSearch(query, fetchImpl);
+  } catch {
+    results = [];
+  }
+
+  const contactUrl = pickOfficialContactUrl(
+    cleaned,
+    results.map((r) => r.url)
+  );
+  if (!contactUrl) {
+    return {
+      brand: cleaned,
+      matched_query: cleaned,
+      source: 'not_found',
+      verified: false,
+      contact_type: 'unknown',
+      email: null,
+      contact_url: null,
+      phone: null,
+      search_url: searchUrl,
+      note: 'No official support contact found automatically. Use the web search link to look up this brand.',
+    };
+  }
+
+  let email = null;
+  let phone = null;
+  let finalUrl = contactUrl;
+  try {
+    const pageRes = await fetchWithTimeout(
+      contactUrl,
+      { headers: { Accept: 'text/html' } },
+      4500,
+      fetchImpl
+    );
+    if (pageRes.ok && isSafePublicUrl(pageRes.url || contactUrl)) {
+      finalUrl = pageRes.url || contactUrl;
+      const html = (await pageRes.text()).slice(0, 220_000);
+      ({ email, phone } = extractEmailAndPhoneFromHtml(html, finalUrl));
+    }
+  } catch {
+    // Still return the official contact page URL even if fetching fails
+  }
+
+  return {
+    brand: cleaned,
+    matched_query: cleaned,
+    source: 'web_lookup',
+    verified: false,
+    contact_type: email ? 'email' : 'web_form',
+    email,
+    contact_url: finalUrl,
+    phone,
+    search_url: searchUrl,
+    note: "Discovered via web lookup on the brand's website. Please verify before sending.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main Worker Fetch Handler
+// ---------------------------------------------------------------------------
+
+export async function handleRequest(request, env = {}, ctx = null, fetchImpl = fetch) {
+  const origin = resolveCorsOrigin(request.headers.get('Origin'), env);
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  }
+
+  if (request.method !== 'GET') {
+    return jsonResponse({ error: 'Method not allowed' }, 405, origin);
+  }
+
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+
+  if (path === '/' || path === '/health') {
+    return jsonResponse(
+      {
+        status: 'ok',
+        service: 'halallens-research-worker',
+        capabilities: {
+          reddit_oauth: Boolean(env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET),
+          reddit_archive: true,
+          brave_search: Boolean(env.BRAVE_API_KEY),
+          web_fallback: true,
+          halal_directories: Object.values(HALAL_DIRECTORY_HOSTS),
+          brand_contact_lookup: true,
+        },
+      },
+      200,
+      origin
+    );
+  }
+
+  if (path === '/scan') {
+    const brand = (url.searchParams.get('brand') || '').trim();
+    const product = (url.searchParams.get('product') || '').trim();
+    const ingredientsRaw = (url.searchParams.get('ingredients') || '').trim();
+    const fresh = url.searchParams.get('fresh') === '1';
+
+    if (!brand && !product) {
+      return jsonResponse({ error: 'brand or product query parameter is required' }, 400, origin);
+    }
+
+    const cache = typeof caches !== 'undefined' ? caches.default : null;
+    const cacheKeyUrl = new URL(url.toString());
+    cacheKeyUrl.searchParams.delete('fresh');
+    const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
+
+    if (cache && !fresh) {
+      const cachedRes = await cache.match(cacheKey);
+      if (cachedRes) {
+        const cachedData = await cachedRes.json();
+        return jsonResponse({ ...cachedData, cached: true }, 200, origin);
+      }
+    }
+
+    const shortProduct = product.split(/\s+/).slice(0, 4).join(' ');
+    const ingredients = ingredientsRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const [redditRes, webRes] = await Promise.all([
+      searchReddit(brand, shortProduct, env, fetchImpl),
+      searchWebAndHalalSites(brand, shortProduct, ingredients, env, fetchImpl),
+    ]);
+
+    const seen = new Set();
+    const combined = [];
+    for (const item of [...webRes.items, ...redditRes.items]) {
+      const key = (item.url || `${item.source}:${item.title}`).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      combined.push(item);
+    }
+
+    const payload = {
+      ok: true,
+      cached: false,
+      query: { brand, product: shortProduct, ingredients },
+      sources_checked: [
+        { source: webRes.source, status: webRes.status, count: webRes.items.length },
+        { source: redditRes.source, status: redditRes.status, count: redditRes.items.length },
+      ],
+      items: combined.slice(0, 14),
+    };
+
+    const response = jsonResponse(payload, 200, origin, {
+      'Cache-Control': 'public, max-age=86400',
+    });
+
+    if (cache && combined.length > 0 && ctx?.waitUntil) {
+      ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    }
+
+    return response;
+  }
+
+  if (path === '/brand-contact') {
+    const brand = (url.searchParams.get('brand') || '').trim();
+    if (!brand) {
+      return jsonResponse({ error: 'brand query parameter is required' }, 400, origin);
+    }
+    const result = await handleBrandContact(brand, env, fetchImpl);
+    return jsonResponse(result, 200, origin, {
+      'Cache-Control': 'public, max-age=86400',
+    });
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, origin);
+}
+
+export default {
+  fetch(request, env, ctx) {
+    return handleRequest(request, env, ctx);
+  },
+};
