@@ -477,6 +477,7 @@ export function makeProductFromLookup(o: {
   halal?: boolean;
   cert?: string | null;
   kosher?: string | null;
+  image_url?: string | null;
   sourceKind: string;
   sourceLabel: string;
   brandContacts?: Record<string, SavedBrandContact>;
@@ -494,6 +495,7 @@ export function makeProductFromLookup(o: {
     vegan: Boolean(o.vegan),
     email: resolved.email,
     contact_url: resolved.contact_url,
+    image_url: o.image_url || null,
     source: { kind: o.sourceKind, label: o.sourceLabel },
     snapshots: [
       {
@@ -527,10 +529,20 @@ async function fetchJSON(url: string, ms = 7000): Promise<unknown | null> {
   }
 }
 
+function pickOffImageUrl(p: Record<string, unknown>): string | null {
+  for (const key of ['image_front_small_url', 'image_thumb_url', 'image_front_url']) {
+    const val = p[key];
+    if (typeof val === 'string' && val.startsWith('https://')) {
+      return val;
+    }
+  }
+  return null;
+}
+
 async function liveOFF(digits: string) {
   for (const v of upcVariants(digits)) {
     const d = (await fetchJSON(
-      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(v)}.json?fields=code,product_name,brands,categories_tags_en,ingredients_text_en,ingredients_text,labels_tags`
+      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(v)}.json?fields=code,product_name,brands,categories_tags_en,ingredients_text_en,ingredients_text,labels_tags,image_front_small_url,image_front_url,image_thumb_url`
     )) as { status?: number; product?: Record<string, unknown> } | null;
     if (d && d.status === 1 && d.product) {
       const p = d.product;
@@ -545,9 +557,52 @@ async function liveOFF(digits: string) {
         vegan: tags.some((t) => t.includes('vegan')),
         halal: tags.some((t) => t.includes('halal')),
         kosher: tags.find((t) => t.includes('kosher'))?.replace(/^en:/, '') || null,
+        image_url: pickOffImageUrl(p),
       };
     }
   }
+  return null;
+}
+
+export async function fetchProductThumbnail(
+  upc: string,
+  proxyUrl?: string | null
+): Promise<string | null> {
+  const digits = digitsOf(upc);
+  if (digits.length < 8) return null;
+
+  // 1. Direct Open Food Facts thumbnail lookup (free, fast, CORS-friendly)
+  for (const v of upcVariants(digits)) {
+    try {
+      const d = (await fetchJSON(
+        `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(v)}.json?fields=image_front_small_url,image_front_url,image_thumb_url`,
+        5500
+      )) as { status?: number; product?: Record<string, unknown> } | null;
+      if (d && d.status === 1 && d.product) {
+        const img = pickOffImageUrl(d.product);
+        if (img) return img;
+      }
+    } catch {
+      break;
+    }
+  }
+
+  // 2. Cloudflare Worker /product-image fallback (UPCitemdb + 7-day edge cache)
+  const effectiveProxy = getEffectiveProxyUrl(proxyUrl ?? undefined);
+  if (effectiveProxy) {
+    try {
+      const d = (await fetchJSON(
+        `${effectiveProxy}/product-image?upc=${encodeURIComponent(digits)}`,
+        6000
+      )) as { image_url?: string | null } | null;
+      if (d?.image_url && d.image_url.startsWith('https://')) {
+        return d.image_url;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return null;
 }
 

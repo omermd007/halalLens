@@ -1480,7 +1480,87 @@ export async function handleRequest(request, env = {}, ctx = null, fetchImpl = f
     });
   }
 
+  if (path === '/product-image') {
+    const rawUpc = (url.searchParams.get('upc') || '').replace(/\D+/g, '');
+    if (rawUpc.length < 8 || rawUpc.length > 14) {
+      return jsonResponse({ error: 'Valid 8-14 digit upc query parameter is required' }, 400, origin);
+    }
+
+    const cache = typeof caches !== 'undefined' ? caches.default : null;
+    const cacheKey = new Request(url.toString(), { method: 'GET' });
+    if (cache) {
+      const cachedRes = await cache.match(cacheKey);
+      if (cachedRes) {
+        const cachedData = await cachedRes.json();
+        return jsonResponse({ ...cachedData, cached: true }, 200, origin);
+      }
+    }
+
+    const result = await handleProductImage(rawUpc, fetchImpl);
+    const response = jsonResponse(result, 200, origin, {
+      'Cache-Control': result.image_url ? 'public, max-age=604800' : 'public, max-age=3600',
+    });
+    if (cache && result.image_url && ctx?.waitUntil) {
+      ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    }
+    return response;
+  }
+
   return jsonResponse({ error: 'Not found' }, 404, origin);
+}
+
+async function handleProductImage(digits, fetchImpl = fetch) {
+  const variants = [digits];
+  if (digits.length === 12) variants.push(`0${digits}`);
+  else if (digits.length === 13 && digits.startsWith('0')) variants.push(digits.slice(1));
+
+  // 1. Open Food Facts front-of-pack thumbnail
+  for (const v of variants) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(
+          v
+        )}.json?fields=image_front_small_url,image_front_url,image_thumb_url`,
+        { headers: { Accept: 'application/json' } },
+        4500,
+        fetchImpl
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const p = data?.product;
+      const img = p?.image_front_small_url || p?.image_thumb_url || p?.image_front_url || null;
+      if (typeof img === 'string' && isSafePublicUrl(img)) {
+        return { upc: digits, image_url: img, source: 'open_food_facts', cached: false };
+      }
+    } catch {
+      // try next variant or fallback
+    }
+  }
+
+  // 2. UPCitemdb free lookup fallback (U.S. retailer product photos)
+  const upc12 = digits.length === 13 && digits.startsWith('0') ? digits.slice(1) : digits;
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(upc12)}`,
+      { headers: { Accept: 'application/json' } },
+      5000,
+      fetchImpl
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const images = Array.isArray(data?.items?.[0]?.images) ? data.items[0].images : [];
+      const firstSafe = images.find(
+        (u) => typeof u === 'string' && u.startsWith('https://') && isSafePublicUrl(u)
+      );
+      if (firstSafe) {
+        return { upc: digits, image_url: firstSafe, source: 'upcitemdb', cached: false };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return { upc: digits, image_url: null, source: 'not_found', cached: false };
 }
 
 export default {

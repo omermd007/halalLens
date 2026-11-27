@@ -17,7 +17,7 @@ import { fmtDate, freshnessLabel } from '../engine/evaluator';
 import { RES_META, RULE_BY_ID, STATUS_META } from '../engine/rules';
 import { CACHE_COUNT } from '../engine/store';
 import type { FlagEvaluation, ProductEvaluation, Tone } from '../engine/types';
-import { StatusGlyph } from './StatusIcon';
+import { ProductThumb, StatusGlyph } from './StatusIcon';
 
 function HighlightedIngredients({ raw, flags }: { raw: string; flags: FlagEvaluation[] }) {
   if (!raw) {
@@ -147,6 +147,11 @@ export function ProductDetailView({
             </div>
 
             <div className="verdict-prod">
+              <ProductThumb
+                src={p.image_url}
+                alt={`${p.brand} ${p.name}`}
+                className="verdict-thumb"
+              />
               <div className="verdict-name">
                 <small>{p.brand}</small>
                 {p.name}

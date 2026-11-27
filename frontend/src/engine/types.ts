@@ -112,6 +112,7 @@ export interface ProductRecord {
   vegan: boolean;
   email: string;
   contact_url: string;
+  image_url?: string | null;
   is_example?: boolean;
   source: { kind: string; label: string };
   snapshots: ProductSnapshot[];

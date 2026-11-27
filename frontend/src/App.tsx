@@ -35,6 +35,7 @@ import {
   DEFAULT_PROXY_URL,
   detectBackendMode,
   exportBackupJson,
+  fetchProductThumbnail,
   liveRedditForumScan,
   loadPersistedState,
   makeProductFromLookup,
@@ -121,6 +122,49 @@ export default function App() {
     () => (productId ? evals.find((e) => e.p.id === productId) || null : null),
     [evals, productId]
   );
+
+  // Lazily backfill product thumbnails from Open Food Facts (+ Worker fallback) and cache in localStorage
+  const attemptedThumbsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const candidates: ProductRecord[] = [];
+    if (activeEval?.p && !activeEval.p.image_url) {
+      candidates.push(activeEval.p);
+    }
+    for (const p of persisted.products) {
+      if (!p.image_url && !candidates.some((c) => c.id === p.id)) {
+        candidates.push(p);
+      }
+      if (candidates.length >= 10) break;
+    }
+
+    const pending = candidates.filter((p) => {
+      const key = `${p.id}:${p.upc}`;
+      return digitsOf(p.upc).length >= 8 && !attemptedThumbsRef.current.has(key);
+    });
+    if (pending.length === 0) return;
+
+    (async () => {
+      for (const prod of pending) {
+        if (cancelled) break;
+        const key = `${prod.id}:${prod.upc}`;
+        attemptedThumbsRef.current.add(key);
+        const imgUrl = await fetchProductThumbnail(prod.upc, persisted.proxyUrl);
+        if (!cancelled && imgUrl) {
+          setPersisted((prev) => ({
+            ...prev,
+            products: prev.products.map((p) =>
+              p.id === prod.id && !p.image_url ? { ...p, image_url: imgUrl } : p
+            ),
+          }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeEval?.p.id, persisted.products.length, persisted.proxyUrl]);
 
   const openProduct = useCallback((id: string) => {
     setProductId(id);

@@ -344,3 +344,38 @@ test('GET /brand-contact uses Gemini Google Search Grounding and enforces email 
   assert.equal(body.contact_url, 'https://chomps.com/pages/contact');
 });
 
+test('GET /product-image falls back to UPCitemdb when Open Food Facts has no photo', async () => {
+  const mockFetch = async (url) => {
+    const u = String(url);
+    if (u.includes('openfoodfacts.org')) {
+      return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+    }
+    if (u.includes('api.upcitemdb.com')) {
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              images: [
+                'http://insecure.example.com/skip.jpg',
+                'https://i5.walmartimages.com/asr/kraft-mac.jpg',
+              ],
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response('', { status: 404 });
+  };
+
+  const req = new Request('https://halallens.workers.dev/product-image?upc=021000658831', {
+    headers: { Origin: 'https://omermd007.github.io' },
+  });
+  const res = await handleRequest(req, {}, null, mockFetch);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.source, 'upcitemdb');
+  assert.equal(body.image_url, 'https://i5.walmartimages.com/asr/kraft-mac.jpg');
+});
+
+
